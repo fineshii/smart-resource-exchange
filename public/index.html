@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#f6f2ea">
+  <title>Smart Resource Exchange</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <p class="eyebrow">DAA based web application</p>
+      <h1>Smart Resource Exchange</h1>
+    </div>
+    <div class="server-pill">
+      <span></span>
+      C++ Backend
+    </div>
+  </header>
+
+  <main class="layout">
+    <section class="overview">
+      <div>
+        <p class="eyebrow">Student resource platform</p>
+        <h2>Exchange books, calculators, notes, and lab materials with fair algorithmic allocation.</h2>
+      </div>
+      <p>
+        Offers are scored using credit score, urgency, and bid value. When a resource deadline is reached,
+        the C++ server uses a priority queue and greedy selection to choose the best valid student request.
+      </p>
+    </section>
+
+    <section class="metrics" aria-label="System metrics">
+      <article>
+        <span id="active-count">0</span>
+        <p>Active listings</p>
+      </article>
+      <article>
+        <span id="offer-count">0</span>
+        <p>Valid offers</p>
+      </article>
+      <article>
+        <span>O(n log n)</span>
+        <p>Heap processing</p>
+      </article>
+    </section>
+
+    <section class="workspace">
+      <section class="panel resource-panel">
+        <div class="panel-head">
+          <div>
+            <p class="eyebrow">Resources</p>
+            <h2>Available listings</h2>
+          </div>
+          <button id="refresh-button" class="icon-button" type="button" title="Refresh listings">Refresh</button>
+        </div>
+        <div id="resource-list" class="resource-list"></div>
+      </section>
+
+      <section class="panel offer-panel">
+        <div class="panel-head">
+          <div>
+            <p class="eyebrow">Submit request</p>
+            <h2>Exchange or bid</h2>
+          </div>
+        </div>
+
+        <form id="offer-form" class="form-grid">
+          <label>
+            Resource
+            <select id="resource-id" required></select>
+          </label>
+
+          <label>
+            Student name
+            <input id="student-name" type="text" value="Priya" required>
+          </label>
+
+          <div class="two-col">
+            <label>
+              Credit score
+              <input id="credits" type="number" min="0" max="100" value="18" required>
+            </label>
+            <label>
+              Urgency
+              <select id="urgency">
+                <option value="High">High</option>
+                <option value="Medium">Medium</option>
+                <option value="Low">Low</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="two-col">
+            <label>
+              Mode
+              <select id="mode">
+                <option value="Exchange">Exchange</option>
+                <option value="Bidding">Bidding</option>
+              </select>
+            </label>
+            <label>
+              Bid value
+              <input id="bid-value" type="number" min="0" value="0">
+            </label>
+          </div>
+
+          <button class="primary-button" type="submit">Submit offer</button>
+        </form>
+        <p id="status" class="status hidden" aria-live="polite"></p>
+      </section>
+    </section>
+
+    <section class="panel algorithm-panel">
+      <div>
+        <p class="eyebrow">DAA core</p>
+        <h2>Priority score formula</h2>
+      </div>
+      <code>Priority Score = (Credit Score x 2) + Urgency Weight + Bid Value</code>
+      <div class="steps">
+        <span>Validate deadline</span>
+        <span>Calculate score</span>
+        <span>Insert into heap</span>
+        <span>Extract maximum</span>
+        <span>Allocate resource</span>
+      </div>
+    </section>
+
+    <section class="panel extras-panel">
+      <div>
+        <p class="eyebrow">Student benefit module</p>
+        <h2>Internships and scholarships</h2>
+      </div>
+      <div id="internship-list" class="internship-list"></div>
+    </section>
+  </main>
+
+  <template id="resource-template">
+    <article class="resource-card">
+      <div class="card-main">
+        <div>
+          <p class="resource-type"></p>
+          <h3></h3>
+        </div>
+        <span class="badge"></span>
+      </div>
+      <p class="description"></p>
+      <div class="card-grid">
+        <span><strong>Mode</strong><b class="mode"></b></span>
+        <span><strong>Deadline</strong><b class="deadline"></b></span>
+        <span><strong>Offers</strong><b class="offers"></b></span>
+        <span><strong>Winner</strong><b class="winner"></b></span>
+      </div>
+    </article>
+  </template>
+
+  <script src="/app.js"></script>
+</body>
+</html>

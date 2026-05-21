@@ -1,0 +1,10 @@
+{
+  "name": "smart-resource-exchange",
+  "version": "1.0.0",
+  "private": true,
+  "description": "DAA based Smart Resource Exchange website with a C++ backend.",
+  "scripts": {
+    "build": "g++ -std=c++11 server.cpp -o smart_exchange_server.exe -lws2_32",
+    "start": ".\\smart_exchange_server.exe"
+  }
+}

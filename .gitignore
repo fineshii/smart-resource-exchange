@@ -1,0 +1,32 @@
+.codex/
+server.err.log
+server.out.log
+node_modules/
+
+# Build outputs
+*.exe
+*.obj
+*.o
+*.class
+
+# Runtime database/storage files
+data/*.db
+data/*.json
+
+# Local/editor files
+.DS_Store
+Thumbs.db
+*.log
+
+# Previous local practice/demo files outside this project
+/*.java
+/input.txt
+/output.txt
+/p1/
+/app.js
+/index.html
+/styles.css
+/manifest.webmanifest
+/sw.js
+/server.js
+/*.jpg
