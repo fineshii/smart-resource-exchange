@@ -1,0 +1,43 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Build Smart Resource Exchange",
+      "type": "shell",
+      "command": "npm.cmd",
+      "args": ["run", "build"],
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared",
+        "clear": true
+      }
+    },
+    {
+      "label": "Run Smart Resource Exchange",
+      "type": "shell",
+      "command": "npm.cmd",
+      "args": ["start"],
+      "isBackground": true,
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "Build and Run Smart Resource Exchange",
+      "dependsOrder": "sequence",
+      "dependsOn": [
+        "Build Smart Resource Exchange",
+        "Run Smart Resource Exchange"
+      ],
+      "problemMatcher": []
+    }
+  ]
+}
