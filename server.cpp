@@ -1,5 +1,6 @@
 #include <winsock2.h>
 #include <ws2tcpip.h>
+#include <windows.h>
 
 #include <algorithm>
 #include <ctime>
@@ -10,6 +11,8 @@
 #include <sstream>
 #include <string>
 #include <vector>
+
+#include "sqlite3.h"
 
 #pragma comment(lib, "ws2_32.lib")
 
@@ -46,58 +49,11 @@ struct Internship {
 
 std::vector<Resource> resources;
 std::vector<Internship> internships;
+sqlite3* database = nullptr;
+CRITICAL_SECTION appLock;
 
 const std::string DATA_DIR = "data";
-const std::string RESOURCES_FILE = "data/resources.db";
-const std::string OFFERS_FILE = "data/offers.db";
-const std::string INTERNSHIPS_FILE = "data/internships.db";
-
-std::string encodeField(const std::string& value) {
-  std::ostringstream out;
-  const char* hex = "0123456789ABCDEF";
-  for (unsigned char ch : value) {
-    if ((ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') || ch == '-' || ch == '_' || ch == '.') {
-      out << ch;
-    } else if (ch == ' ') {
-      out << '+';
-    } else {
-      out << '%' << hex[ch >> 4] << hex[ch & 15];
-    }
-  }
-  return out.str();
-}
-
-int hexValue(char ch) {
-  if (ch >= '0' && ch <= '9') return ch - '0';
-  if (ch >= 'A' && ch <= 'F') return ch - 'A' + 10;
-  if (ch >= 'a' && ch <= 'f') return ch - 'a' + 10;
-  return 0;
-}
-
-std::string decodeField(const std::string& value) {
-  std::ostringstream out;
-  for (size_t i = 0; i < value.size(); ++i) {
-    if (value[i] == '+') {
-      out << ' ';
-    } else if (value[i] == '%' && i + 2 < value.size()) {
-      out << static_cast<char>((hexValue(value[i + 1]) << 4) + hexValue(value[i + 2]));
-      i += 2;
-    } else {
-      out << value[i];
-    }
-  }
-  return out.str();
-}
-
-std::vector<std::string> splitLine(const std::string& line) {
-  std::vector<std::string> parts;
-  std::string part;
-  std::istringstream stream(line);
-  while (std::getline(stream, part, '|')) {
-    parts.push_back(part);
-  }
-  return parts;
-}
+const std::string DATABASE_FILE = "data/smart_resource_exchange.sqlite";
 
 std::string escapeJson(const std::string& value) {
   std::ostringstream out;
@@ -121,7 +77,219 @@ int calculatePriorityScore(int credits, const std::string& urgency, int bidValue
   return (credits * 2) + urgencyWeight(urgency) + bidComponent;
 }
 
-void saveDatabase();
+std::string sqliteText(sqlite3_stmt* statement, int column) {
+  const unsigned char* value = sqlite3_column_text(statement, column);
+  return value ? reinterpret_cast<const char*>(value) : "";
+}
+
+bool executeSql(const std::string& sql) {
+  char* error = nullptr;
+  if (sqlite3_exec(database, sql.c_str(), nullptr, nullptr, &error) != SQLITE_OK) {
+    std::cerr << "SQLite error: " << (error ? error : "unknown error") << "\n";
+    sqlite3_free(error);
+    return false;
+  }
+  return true;
+}
+
+void bindText(sqlite3_stmt* statement, int index, const std::string& value) {
+  sqlite3_bind_text(statement, index, value.c_str(), -1, SQLITE_TRANSIENT);
+}
+
+bool initDatabase() {
+  CreateDirectoryA(DATA_DIR.c_str(), nullptr);
+  if (sqlite3_open(DATABASE_FILE.c_str(), &database) != SQLITE_OK) {
+    std::cerr << "Could not open SQLite database.\n";
+    return false;
+  }
+
+  return executeSql(
+    "PRAGMA foreign_keys = ON;"
+    "CREATE TABLE IF NOT EXISTS resources ("
+    "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+    "  title TEXT NOT NULL,"
+    "  type TEXT NOT NULL,"
+    "  owner TEXT NOT NULL,"
+    "  description TEXT NOT NULL,"
+    "  urgency TEXT NOT NULL,"
+    "  mode TEXT NOT NULL,"
+    "  deadline INTEGER NOT NULL,"
+    "  allocated_to TEXT DEFAULT '',"
+    "  best_score INTEGER DEFAULT 0"
+    ");"
+    "CREATE TABLE IF NOT EXISTS offers ("
+    "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+    "  resource_id INTEGER NOT NULL,"
+    "  student_name TEXT NOT NULL,"
+    "  credits INTEGER NOT NULL,"
+    "  urgency TEXT NOT NULL,"
+    "  mode TEXT NOT NULL,"
+    "  bid_value INTEGER DEFAULT 0,"
+    "  priority_score INTEGER NOT NULL,"
+    "  timestamp INTEGER NOT NULL,"
+    "  FOREIGN KEY(resource_id) REFERENCES resources(id) ON DELETE CASCADE"
+    ");"
+    "CREATE TABLE IF NOT EXISTS internships ("
+    "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+    "  company TEXT NOT NULL,"
+    "  title TEXT NOT NULL,"
+    "  deadline TEXT NOT NULL"
+    ");"
+  );
+}
+
+int tableCount(const std::string& tableName) {
+  std::string sql = "SELECT COUNT(*) FROM " + tableName;
+  sqlite3_stmt* statement = nullptr;
+  int count = 0;
+  if (sqlite3_prepare_v2(database, sql.c_str(), -1, &statement, nullptr) == SQLITE_OK &&
+      sqlite3_step(statement) == SQLITE_ROW) {
+    count = sqlite3_column_int(statement, 0);
+  }
+  sqlite3_finalize(statement);
+  return count;
+}
+
+void insertResource(const std::string& title, const std::string& type, const std::string& owner,
+                    const std::string& description, const std::string& urgency,
+                    const std::string& mode, std::time_t deadline) {
+  sqlite3_stmt* statement = nullptr;
+  sqlite3_prepare_v2(database,
+    "INSERT INTO resources(title, type, owner, description, urgency, mode, deadline, allocated_to, best_score) "
+    "VALUES (?, ?, ?, ?, ?, ?, ?, '', 0)",
+    -1, &statement, nullptr);
+  bindText(statement, 1, title);
+  bindText(statement, 2, type);
+  bindText(statement, 3, owner);
+  bindText(statement, 4, description);
+  bindText(statement, 5, urgency);
+  bindText(statement, 6, mode);
+  sqlite3_bind_int64(statement, 7, static_cast<sqlite3_int64>(deadline));
+  sqlite3_step(statement);
+  sqlite3_finalize(statement);
+}
+
+void insertOffer(int resourceId, const std::string& studentName, int credits, const std::string& urgency,
+                 const std::string& mode, int bidValue, int priorityScore, std::time_t timestamp) {
+  sqlite3_stmt* statement = nullptr;
+  sqlite3_prepare_v2(database,
+    "INSERT INTO offers(resource_id, student_name, credits, urgency, mode, bid_value, priority_score, timestamp) "
+    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    -1, &statement, nullptr);
+  sqlite3_bind_int(statement, 1, resourceId);
+  bindText(statement, 2, studentName);
+  sqlite3_bind_int(statement, 3, credits);
+  bindText(statement, 4, urgency);
+  bindText(statement, 5, mode);
+  sqlite3_bind_int(statement, 6, bidValue);
+  sqlite3_bind_int(statement, 7, priorityScore);
+  sqlite3_bind_int64(statement, 8, static_cast<sqlite3_int64>(timestamp));
+  sqlite3_step(statement);
+  sqlite3_finalize(statement);
+}
+
+void seedData() {
+  std::time_t now = std::time(nullptr);
+
+  insertResource("DAA Reference Book", "Book", "Aarav",
+    "Algorithms textbook available for two weeks. Best for exam preparation and project viva practice.",
+    "High", "Exchange", now + 90);
+  insertResource("Scientific Calculator", "Calculator", "Meera",
+    "Casio scientific calculator available for the next lab cycle. Clean condition with working battery.",
+    "Medium", "Bidding", now + 160);
+  insertResource("Physics Lab Manual Notes", "Notes", "Rohan",
+    "Clean handwritten readings and experiment observations for revision before practicals.",
+    "Low", "Exchange", now + 230);
+
+  insertOffer(1, "Nisha", 16, "High", "Exchange", 0, calculatePriorityScore(16, "High", 0, "Exchange"), now - 40);
+  insertOffer(1, "Kabir", 22, "Medium", "Exchange", 0, calculatePriorityScore(22, "Medium", 0, "Exchange"), now - 20);
+  insertOffer(2, "Isha", 11, "Medium", "Bidding", 45, calculatePriorityScore(11, "Medium", 45, "Bidding"), now - 15);
+
+  executeSql(
+    "INSERT INTO internships(company, title, deadline) VALUES "
+    "('Tata Consultancy Services', 'Campus internship applications', '2026-06-05'),"
+    "('Infosys Springboard', 'Scholarship and certification track', '2026-06-12'),"
+    "('AICTE', 'Virtual internship program', '2026-06-20')"
+  );
+}
+
+void ensureSeedData() {
+  if (tableCount("resources") == 0) {
+    seedData();
+  }
+}
+
+void loadData() {
+  resources.clear();
+  internships.clear();
+
+  sqlite3_stmt* statement = nullptr;
+  sqlite3_prepare_v2(database,
+    "SELECT id, title, type, owner, description, urgency, mode, deadline, allocated_to, best_score "
+    "FROM resources ORDER BY allocated_to = '', deadline ASC, id ASC",
+    -1, &statement, nullptr);
+
+  while (sqlite3_step(statement) == SQLITE_ROW) {
+    Resource resource;
+    resource.id = sqlite3_column_int(statement, 0);
+    resource.title = sqliteText(statement, 1);
+    resource.type = sqliteText(statement, 2);
+    resource.owner = sqliteText(statement, 3);
+    resource.description = sqliteText(statement, 4);
+    resource.urgency = sqliteText(statement, 5);
+    resource.mode = sqliteText(statement, 6);
+    resource.deadline = static_cast<std::time_t>(sqlite3_column_int64(statement, 7));
+    resource.allocatedTo = sqliteText(statement, 8);
+    resource.bestScore = sqlite3_column_int(statement, 9);
+    resources.push_back(resource);
+  }
+  sqlite3_finalize(statement);
+
+  sqlite3_prepare_v2(database,
+    "SELECT resource_id, student_name, credits, urgency, mode, bid_value, priority_score, timestamp "
+    "FROM offers ORDER BY timestamp ASC",
+    -1, &statement, nullptr);
+
+  while (sqlite3_step(statement) == SQLITE_ROW) {
+    Offer offer;
+    offer.resourceId = sqlite3_column_int(statement, 0);
+    offer.studentName = sqliteText(statement, 1);
+    offer.credits = sqlite3_column_int(statement, 2);
+    offer.urgency = sqliteText(statement, 3);
+    offer.mode = sqliteText(statement, 4);
+    offer.bidValue = sqlite3_column_int(statement, 5);
+    offer.priorityScore = sqlite3_column_int(statement, 6);
+    offer.timestamp = static_cast<std::time_t>(sqlite3_column_int64(statement, 7));
+
+    auto it = std::find_if(resources.begin(), resources.end(), [&offer](const Resource& resource) {
+      return resource.id == offer.resourceId;
+    });
+    if (it != resources.end()) {
+      it->offers.push_back(offer);
+    }
+  }
+  sqlite3_finalize(statement);
+
+  sqlite3_prepare_v2(database,
+    "SELECT company, title, deadline FROM internships ORDER BY deadline ASC",
+    -1, &statement, nullptr);
+  while (sqlite3_step(statement) == SQLITE_ROW) {
+    internships.push_back({sqliteText(statement, 0), sqliteText(statement, 1), sqliteText(statement, 2)});
+  }
+  sqlite3_finalize(statement);
+}
+
+void updateAllocation(int resourceId, const std::string& allocatedTo, int bestScore) {
+  sqlite3_stmt* statement = nullptr;
+  sqlite3_prepare_v2(database,
+    "UPDATE resources SET allocated_to = ?, best_score = ? WHERE id = ?",
+    -1, &statement, nullptr);
+  bindText(statement, 1, allocatedTo);
+  sqlite3_bind_int(statement, 2, bestScore);
+  sqlite3_bind_int(statement, 3, resourceId);
+  sqlite3_step(statement);
+  sqlite3_finalize(statement);
+}
 
 bool allocateExpiredResources() {
   std::time_t now = std::time(nullptr);
@@ -147,145 +315,19 @@ bool allocateExpiredResources() {
     Offer winner = heap.top();
     resource.allocatedTo = winner.studentName;
     resource.bestScore = winner.priorityScore;
+    updateAllocation(resource.id, winner.studentName, winner.priorityScore);
     changed = true;
-  }
-
-  if (changed) {
-    saveDatabase();
   }
 
   return changed;
 }
 
-void seedData() {
-  resources.clear();
-  internships.clear();
-  std::time_t now = std::time(nullptr);
-
-  resources.push_back({1, "DAA Reference Book", "Book", "Aarav", "Cormen-style algorithms book for exam preparation and project viva practice.", "High", "Exchange", now + 90, {}, "", 0});
-  resources.push_back({2, "Scientific Calculator", "Calculator", "Meera", "Casio calculator available for the next lab cycle.", "Medium", "Bidding", now + 160, {}, "", 0});
-  resources.push_back({3, "Physics Lab Manual Notes", "Notes", "Rohan", "Clean handwritten readings and experiment observations for revision.", "Low", "Exchange", now + 230, {}, "", 0});
-
-  resources[0].offers.push_back({1, "Nisha", 16, "High", "Exchange", 0, calculatePriorityScore(16, "High", 0, "Exchange"), now - 40});
-  resources[0].offers.push_back({1, "Kabir", 22, "Medium", "Exchange", 0, calculatePriorityScore(22, "Medium", 0, "Exchange"), now - 20});
-  resources[1].offers.push_back({2, "Isha", 11, "Medium", "Bidding", 45, calculatePriorityScore(11, "Medium", 45, "Bidding"), now - 15});
-
-  internships.push_back({"Tata Consultancy Services", "Campus internship applications", "2026-06-05"});
-  internships.push_back({"Infosys Springboard", "Scholarship and certification track", "2026-06-12"});
-  internships.push_back({"AICTE", "Virtual internship program", "2026-06-20"});
-}
-
-void saveDatabase() {
-  CreateDirectoryA(DATA_DIR.c_str(), nullptr);
-
-  std::ofstream resourceFile(RESOURCES_FILE.c_str(), std::ios::trunc);
-  for (const Resource& resource : resources) {
-    resourceFile
-      << resource.id << "|"
-      << encodeField(resource.title) << "|"
-      << encodeField(resource.type) << "|"
-      << encodeField(resource.owner) << "|"
-      << encodeField(resource.description) << "|"
-      << encodeField(resource.urgency) << "|"
-      << encodeField(resource.mode) << "|"
-      << static_cast<long long>(resource.deadline) << "|"
-      << encodeField(resource.allocatedTo) << "|"
-      << resource.bestScore << "\n";
-  }
-
-  std::ofstream offerFile(OFFERS_FILE.c_str(), std::ios::trunc);
-  for (const Resource& resource : resources) {
-    for (const Offer& offer : resource.offers) {
-      offerFile
-        << offer.resourceId << "|"
-        << encodeField(offer.studentName) << "|"
-        << offer.credits << "|"
-        << encodeField(offer.urgency) << "|"
-        << encodeField(offer.mode) << "|"
-        << offer.bidValue << "|"
-        << offer.priorityScore << "|"
-        << static_cast<long long>(offer.timestamp) << "\n";
-    }
-  }
-
-  std::ofstream internshipFile(INTERNSHIPS_FILE.c_str(), std::ios::trunc);
-  for (const Internship& item : internships) {
-    internshipFile
-      << encodeField(item.company) << "|"
-      << encodeField(item.title) << "|"
-      << encodeField(item.deadline) << "\n";
-  }
-}
-
-bool loadDatabase() {
-  std::ifstream resourceFile(RESOURCES_FILE.c_str());
-  if (!resourceFile) {
-    return false;
-  }
-
-  resources.clear();
-  internships.clear();
-
-  std::string line;
-  while (std::getline(resourceFile, line)) {
-    std::vector<std::string> parts = splitLine(line);
-    if (parts.size() < 10) {
-      continue;
-    }
-
-    Resource resource;
-    resource.id = std::stoi(parts[0]);
-    resource.title = decodeField(parts[1]);
-    resource.type = decodeField(parts[2]);
-    resource.owner = decodeField(parts[3]);
-    resource.description = decodeField(parts[4]);
-    resource.urgency = decodeField(parts[5]);
-    resource.mode = decodeField(parts[6]);
-    resource.deadline = static_cast<std::time_t>(std::stoll(parts[7]));
-    resource.allocatedTo = decodeField(parts[8]);
-    resource.bestScore = std::stoi(parts[9]);
-    resources.push_back(resource);
-  }
-
-  std::ifstream offerFile(OFFERS_FILE.c_str());
-  while (offerFile && std::getline(offerFile, line)) {
-    std::vector<std::string> parts = splitLine(line);
-    if (parts.size() < 8) {
-      continue;
-    }
-
-    Offer offer;
-    offer.resourceId = std::stoi(parts[0]);
-    offer.studentName = decodeField(parts[1]);
-    offer.credits = std::stoi(parts[2]);
-    offer.urgency = decodeField(parts[3]);
-    offer.mode = decodeField(parts[4]);
-    offer.bidValue = std::stoi(parts[5]);
-    offer.priorityScore = std::stoi(parts[6]);
-    offer.timestamp = static_cast<std::time_t>(std::stoll(parts[7]));
-
-    auto it = std::find_if(resources.begin(), resources.end(), [&offer](const Resource& resource) {
-      return resource.id == offer.resourceId;
-    });
-    if (it != resources.end()) {
-      it->offers.push_back(offer);
-    }
-  }
-
-  std::ifstream internshipFile(INTERNSHIPS_FILE.c_str());
-  while (internshipFile && std::getline(internshipFile, line)) {
-    std::vector<std::string> parts = splitLine(line);
-    if (parts.size() < 3) {
-      continue;
-    }
-    internships.push_back({decodeField(parts[0]), decodeField(parts[1]), decodeField(parts[2])});
-  }
-
-  return !resources.empty();
-}
-
 std::string resourcesJson() {
-  allocateExpiredResources();
+  loadData();
+  if (allocateExpiredResources()) {
+    loadData();
+  }
+
   std::ostringstream json;
   json << "{\"resources\":[";
   for (size_t i = 0; i < resources.size(); ++i) {
@@ -305,6 +347,7 @@ std::string resourcesJson() {
          << "\"bestScore\":" << r.bestScore
          << "}";
   }
+
   json << "],\"internships\":[";
   for (size_t i = 0; i < internships.size(); ++i) {
     const Internship& item = internships[i];
@@ -332,6 +375,9 @@ int parseIntField(const std::string& body, const std::string& key, int fallback 
 }
 
 std::string submitOffer(const std::string& body, int& statusCode) {
+  loadData();
+  allocateExpiredResources();
+
   int resourceId = parseIntField(body, "resourceId");
   std::string studentName = parseStringField(body, "studentName");
   int credits = parseIntField(body, "credits");
@@ -353,19 +399,50 @@ std::string submitOffer(const std::string& body, int& statusCode) {
     return "{\"error\":\"Resource not found.\"}";
   }
 
-  allocateExpiredResources();
   if (!it->allocatedTo.empty() || std::time(nullptr) >= it->deadline) {
     statusCode = 409;
     return "{\"error\":\"Deadline has passed. This resource is already closed.\"}";
   }
 
   int score = calculatePriorityScore(credits, urgency, bidValue, mode);
-  it->offers.push_back({resourceId, studentName, credits, urgency, mode, bidValue, score, std::time(nullptr)});
-  saveDatabase();
+  insertOffer(resourceId, studentName, credits, urgency, mode, bidValue, score, std::time(nullptr));
 
   statusCode = 201;
   std::ostringstream response;
   response << "{\"ok\":true,\"score\":" << score << "}";
+  return response.str();
+}
+
+std::string createResource(const std::string& body, int& statusCode) {
+  std::string title = parseStringField(body, "title");
+  std::string type = parseStringField(body, "type");
+  std::string owner = parseStringField(body, "owner");
+  std::string description = parseStringField(body, "description");
+  std::string urgency = parseStringField(body, "urgency");
+  std::string mode = parseStringField(body, "mode");
+  int durationMinutes = parseIntField(body, "durationMinutes", 180);
+
+  if (title.empty() || type.empty() || owner.empty() || description.empty()) {
+    statusCode = 400;
+    return "{\"error\":\"Title, type, owner, and description are required.\"}";
+  }
+
+  if (urgency != "High" && urgency != "Medium" && urgency != "Low") {
+    urgency = "Medium";
+  }
+  if (mode != "Exchange" && mode != "Bidding") {
+    mode = "Exchange";
+  }
+  if (durationMinutes < 5) {
+    durationMinutes = 5;
+  }
+
+  std::time_t deadline = std::time(nullptr) + (durationMinutes * 60);
+  insertResource(title, type, owner, description, urgency, mode, deadline);
+
+  statusCode = 201;
+  std::ostringstream response;
+  response << "{\"ok\":true,\"id\":" << sqlite3_last_insert_rowid(database) << "}";
   return response.str();
 }
 
@@ -442,6 +519,7 @@ void handleClient(SOCKET client) {
   std::string method;
   std::string path;
   requestStream >> method >> path;
+
   std::string body;
   size_t bodyStart = request.find("\r\n\r\n");
   if (bodyStart != std::string::npos) {
@@ -453,9 +531,17 @@ void handleClient(SOCKET client) {
   std::string contentType = "application/json; charset=utf-8";
 
   if (method == "GET" && path == "/api/resources") {
+    EnterCriticalSection(&appLock);
     responseBody = resourcesJson();
+    LeaveCriticalSection(&appLock);
   } else if (method == "POST" && path == "/api/offers") {
+    EnterCriticalSection(&appLock);
     responseBody = submitOffer(body, statusCode);
+    LeaveCriticalSection(&appLock);
+  } else if (method == "POST" && path == "/api/resources") {
+    EnterCriticalSection(&appLock);
+    responseBody = createResource(body, statusCode);
+    LeaveCriticalSection(&appLock);
   } else if (method == "GET") {
     if (!readFile(path, responseBody, contentType)) {
       statusCode = 404;
@@ -479,14 +565,18 @@ DWORD WINAPI clientThread(LPVOID parameter) {
 }
 
 int main() {
-  if (!loadDatabase()) {
-    seedData();
-    saveDatabase();
+  InitializeCriticalSection(&appLock);
+  if (!initDatabase()) {
+    DeleteCriticalSection(&appLock);
+    return 1;
   }
+  ensureSeedData();
 
   WSADATA data;
   if (WSAStartup(MAKEWORD(2, 2), &data) != 0) {
     std::cerr << "Winsock startup failed.\n";
+    sqlite3_close(database);
+    DeleteCriticalSection(&appLock);
     return 1;
   }
 
@@ -494,6 +584,8 @@ int main() {
   if (serverSocket == INVALID_SOCKET) {
     std::cerr << "Could not create server socket.\n";
     WSACleanup();
+    sqlite3_close(database);
+    DeleteCriticalSection(&appLock);
     return 1;
   }
 
@@ -506,11 +598,14 @@ int main() {
     std::cerr << "Port 3000 is already in use.\n";
     closesocket(serverSocket);
     WSACleanup();
+    sqlite3_close(database);
+    DeleteCriticalSection(&appLock);
     return 1;
   }
 
   listen(serverSocket, SOMAXCONN);
   std::cout << "Smart Resource Exchange running on http://localhost:3000\n";
+  std::cout << "SQLite database: " << DATABASE_FILE << "\n";
 
   while (true) {
     SOCKET client = accept(serverSocket, nullptr, nullptr);
@@ -526,5 +621,7 @@ int main() {
 
   closesocket(serverSocket);
   WSACleanup();
+  sqlite3_close(database);
+  DeleteCriticalSection(&appLock);
   return 0;
 }

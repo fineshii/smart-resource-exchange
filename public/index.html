@@ -3,142 +3,213 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="theme-color" content="#f6f2ea">
+  <meta name="theme-color" content="#f7f8fb">
   <title>Smart Resource Exchange</title>
   <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
-  <header class="topbar">
+  <header class="app-header">
     <div>
-      <p class="eyebrow">DAA based web application</p>
+      <p class="eyebrow">Campus exchange desk</p>
       <h1>Smart Resource Exchange</h1>
     </div>
-    <div class="server-pill">
-      <span></span>
-      C++ Backend
-    </div>
+    <nav aria-label="Primary navigation">
+      <a href="#market">Browse</a>
+      <a href="#request">Request</a>
+      <a href="#list-resource">List resource</a>
+    </nav>
   </header>
 
-  <main class="layout">
-    <section class="overview">
-      <div>
-        <p class="eyebrow">Student resource platform</p>
-        <h2>Exchange books, calculators, notes, and lab materials with fair algorithmic allocation.</h2>
-      </div>
-      <p>
-        Offers are scored using credit score, urgency, and bid value. When a resource deadline is reached,
-        the C++ server uses a priority queue and greedy selection to choose the best valid student request.
-      </p>
-    </section>
-
-    <section class="metrics" aria-label="System metrics">
+  <main>
+    <section class="summary-strip" aria-label="Marketplace summary">
       <article>
         <span id="active-count">0</span>
-        <p>Active listings</p>
+        <p>Open listings</p>
       </article>
       <article>
         <span id="offer-count">0</span>
-        <p>Valid offers</p>
+        <p>Submitted offers</p>
       </article>
       <article>
-        <span>O(n log n)</span>
-        <p>Heap processing</p>
+        <span id="listed-count">0</span>
+        <p>Total resources</p>
+      </article>
+      <article>
+        <span>SQLite</span>
+        <p>Persistent storage</p>
       </article>
     </section>
 
-    <section class="workspace">
-      <section class="panel resource-panel">
-        <div class="panel-head">
-          <div>
-            <p class="eyebrow">Resources</p>
-            <h2>Available listings</h2>
+    <section class="market-shell" id="market">
+      <aside class="sidebar">
+        <section class="panel">
+          <div class="section-head">
+            <p class="eyebrow">Find resources</p>
+            <h2>Marketplace</h2>
           </div>
-          <button id="refresh-button" class="icon-button" type="button" title="Refresh listings">Refresh</button>
+          <label>
+            Search
+            <input id="search" type="search" placeholder="Book, calculator, notes">
+          </label>
+          <label>
+            Type
+            <select id="type-filter">
+              <option value="All">All resources</option>
+              <option value="Book">Books</option>
+              <option value="Calculator">Calculators</option>
+              <option value="Notes">Notes</option>
+              <option value="Lab Material">Lab materials</option>
+              <option value="Other">Other</option>
+            </select>
+          </label>
+          <button id="refresh-button" class="secondary-button" type="button">Refresh listings</button>
+        </section>
+
+        <section class="panel" id="request">
+          <div class="section-head">
+            <p class="eyebrow">Student request</p>
+            <h2>Make an offer</h2>
+          </div>
+          <form id="offer-form" class="form-stack">
+            <label>
+              Resource
+              <select id="resource-id" required></select>
+            </label>
+            <label>
+              Student name
+              <input id="student-name" type="text" value="Priya" required>
+            </label>
+            <div class="two-col">
+              <label>
+                Credit score
+                <input id="credits" type="number" min="0" max="100" value="18" required>
+              </label>
+              <label>
+                Urgency
+                <select id="urgency">
+                  <option value="High">High</option>
+                  <option value="Medium">Medium</option>
+                  <option value="Low">Low</option>
+                </select>
+              </label>
+            </div>
+            <div class="two-col">
+              <label>
+                Mode
+                <select id="mode">
+                  <option value="Exchange">Exchange</option>
+                  <option value="Bidding">Bidding</option>
+                </select>
+              </label>
+              <label>
+                Bid value
+                <input id="bid-value" type="number" min="0" value="0">
+              </label>
+            </div>
+            <button class="primary-button" type="submit">Submit offer</button>
+          </form>
+          <p id="offer-status" class="status hidden" aria-live="polite"></p>
+        </section>
+      </aside>
+
+      <section class="feed">
+        <div class="feed-head">
+          <div>
+            <p class="eyebrow">Live listings</p>
+            <h2>Resources available on campus</h2>
+          </div>
+          <span id="database-pill">SQL connected</span>
         </div>
         <div id="resource-list" class="resource-list"></div>
       </section>
+    </section>
 
-      <section class="panel offer-panel">
-        <div class="panel-head">
-          <div>
-            <p class="eyebrow">Submit request</p>
-            <h2>Exchange or bid</h2>
-          </div>
+    <section class="lower-grid">
+      <section class="panel listing-panel" id="list-resource">
+        <div class="section-head">
+          <p class="eyebrow">List yours</p>
+          <h2>Add a resource</h2>
         </div>
-
-        <form id="offer-form" class="form-grid">
+        <form id="listing-form" class="listing-grid">
           <label>
-            Resource
-            <select id="resource-id" required></select>
+            Resource title
+            <input id="listing-title" type="text" placeholder="Engineering drawing kit" required>
           </label>
-
           <label>
-            Student name
-            <input id="student-name" type="text" value="Priya" required>
+            Owner name
+            <input id="listing-owner" type="text" placeholder="Your name" required>
           </label>
-
-          <div class="two-col">
-            <label>
-              Credit score
-              <input id="credits" type="number" min="0" max="100" value="18" required>
-            </label>
-            <label>
-              Urgency
-              <select id="urgency">
-                <option value="High">High</option>
-                <option value="Medium">Medium</option>
-                <option value="Low">Low</option>
-              </select>
-            </label>
-          </div>
-
-          <div class="two-col">
-            <label>
-              Mode
-              <select id="mode">
-                <option value="Exchange">Exchange</option>
-                <option value="Bidding">Bidding</option>
-              </select>
-            </label>
-            <label>
-              Bid value
-              <input id="bid-value" type="number" min="0" value="0">
-            </label>
-          </div>
-
-          <button class="primary-button" type="submit">Submit offer</button>
+          <label>
+            Type
+            <select id="listing-type">
+              <option value="Book">Book</option>
+              <option value="Calculator">Calculator</option>
+              <option value="Notes">Notes</option>
+              <option value="Lab Material">Lab Material</option>
+              <option value="Other">Other</option>
+            </select>
+          </label>
+          <label>
+            Exchange mode
+            <select id="listing-mode">
+              <option value="Exchange">Exchange</option>
+              <option value="Bidding">Bidding</option>
+            </select>
+          </label>
+          <label>
+            Listing urgency
+            <select id="listing-urgency">
+              <option value="High">High</option>
+              <option value="Medium" selected>Medium</option>
+              <option value="Low">Low</option>
+            </select>
+          </label>
+          <label>
+            Deadline window
+            <select id="listing-duration">
+              <option value="30">30 minutes</option>
+              <option value="120">2 hours</option>
+              <option value="1440" selected>1 day</option>
+              <option value="4320">3 days</option>
+              <option value="10080">1 week</option>
+            </select>
+          </label>
+          <label class="wide">
+            Details
+            <textarea id="listing-description" rows="4" placeholder="Condition, pickup point, subject, semester, or return expectations" required></textarea>
+          </label>
+          <button class="primary-button wide" type="submit">Publish resource</button>
         </form>
-        <p id="status" class="status hidden" aria-live="polite"></p>
+        <p id="listing-status" class="status hidden" aria-live="polite"></p>
       </section>
-    </section>
 
-    <section class="panel algorithm-panel">
-      <div>
-        <p class="eyebrow">DAA core</p>
-        <h2>Priority score formula</h2>
-      </div>
-      <code>Priority Score = (Credit Score x 2) + Urgency Weight + Bid Value</code>
-      <div class="steps">
-        <span>Validate deadline</span>
-        <span>Calculate score</span>
-        <span>Insert into heap</span>
-        <span>Extract maximum</span>
-        <span>Allocate resource</span>
-      </div>
-    </section>
+      <section class="panel">
+        <div class="section-head">
+          <p class="eyebrow">Allocation queue</p>
+          <h2>How winners are picked</h2>
+        </div>
+        <div class="formula">Priority = credits x 2 + urgency + bid</div>
+        <div class="process-list">
+          <span>Offer saved</span>
+          <span>Deadline checked</span>
+          <span>Max heap built</span>
+          <span>Highest score allocated</span>
+        </div>
+      </section>
 
-    <section class="panel extras-panel">
-      <div>
-        <p class="eyebrow">Student benefit module</p>
-        <h2>Internships and scholarships</h2>
-      </div>
-      <div id="internship-list" class="internship-list"></div>
+      <section class="panel">
+        <div class="section-head">
+          <p class="eyebrow">Opportunities</p>
+          <h2>Internships and scholarships</h2>
+        </div>
+        <div id="internship-list" class="internship-list"></div>
+      </section>
     </section>
   </main>
 
   <template id="resource-template">
     <article class="resource-card">
-      <div class="card-main">
+      <div class="card-top">
         <div>
           <p class="resource-type"></p>
           <h3></h3>
@@ -146,12 +217,13 @@
         <span class="badge"></span>
       </div>
       <p class="description"></p>
-      <div class="card-grid">
+      <div class="card-meta">
         <span><strong>Mode</strong><b class="mode"></b></span>
         <span><strong>Deadline</strong><b class="deadline"></b></span>
         <span><strong>Offers</strong><b class="offers"></b></span>
         <span><strong>Winner</strong><b class="winner"></b></span>
       </div>
+      <button class="request-button" type="button">Request this</button>
     </article>
   </template>
 

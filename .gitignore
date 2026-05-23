@@ -12,6 +12,8 @@ node_modules/
 # Runtime database/storage files
 data/*.db
 data/*.json
+data/*.sqlite
+vendor/*.zip
 
 # Local/editor files
 .DS_Store

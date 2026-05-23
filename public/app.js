@@ -1,33 +1,59 @@
 const state = {
   resources: [],
-  internships: []
+  internships: [],
+  search: "",
+  type: "All"
 };
 
 const dom = {
   resourceList: document.querySelector("#resource-list"),
   internshipList: document.querySelector("#internship-list"),
   resourceSelect: document.querySelector("#resource-id"),
-  form: document.querySelector("#offer-form"),
-  status: document.querySelector("#status"),
+  offerForm: document.querySelector("#offer-form"),
+  listingForm: document.querySelector("#listing-form"),
+  offerStatus: document.querySelector("#offer-status"),
+  listingStatus: document.querySelector("#listing-status"),
   refresh: document.querySelector("#refresh-button"),
   activeCount: document.querySelector("#active-count"),
   offerCount: document.querySelector("#offer-count"),
-  template: document.querySelector("#resource-template")
+  listedCount: document.querySelector("#listed-count"),
+  template: document.querySelector("#resource-template"),
+  search: document.querySelector("#search"),
+  typeFilter: document.querySelector("#type-filter")
 };
 
-function showStatus(message, isError = false) {
-  dom.status.textContent = message;
-  dom.status.classList.toggle("error", isError);
-  dom.status.classList.remove("hidden");
+function showStatus(element, message, isError = false) {
+  element.textContent = message;
+  element.classList.toggle("error", isError);
+  element.classList.remove("hidden");
 }
 
 function formatDeadline(value) {
   const date = new Date(value * 1000);
   return new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
     hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit"
+    minute: "2-digit"
   }).format(date);
+}
+
+function isOpen(resource) {
+  return resource.allocatedTo === "";
+}
+
+function filteredResources() {
+  const query = state.search.toLowerCase();
+  return state.resources.filter((resource) => {
+    const matchesType = state.type === "All" || resource.type === state.type;
+    const haystack = `${resource.title} ${resource.owner} ${resource.description}`.toLowerCase();
+    return matchesType && haystack.includes(query);
+  });
+}
+
+function selectResource(resourceId) {
+  dom.resourceSelect.value = String(resourceId);
+  document.querySelector("#request").scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 function renderResources() {
@@ -38,8 +64,7 @@ function renderResources() {
   let offerTotal = 0;
 
   state.resources.forEach((resource) => {
-    const isClosed = resource.allocatedTo !== "";
-    if (!isClosed) {
+    if (isOpen(resource)) {
       active += 1;
       const option = document.createElement("option");
       option.value = resource.id;
@@ -47,25 +72,48 @@ function renderResources() {
       dom.resourceSelect.append(option);
     }
     offerTotal += resource.offerCount;
+  });
 
+  filteredResources().forEach((resource) => {
+    const closed = !isOpen(resource);
     const fragment = dom.template.content.cloneNode(true);
-    fragment.querySelector(".resource-type").textContent = `${resource.type} by ${resource.owner}`;
+    fragment.querySelector(".resource-type").textContent = `${resource.type} listed by ${resource.owner}`;
     fragment.querySelector("h3").textContent = resource.title;
     fragment.querySelector(".description").textContent = resource.description;
     fragment.querySelector(".mode").textContent = resource.mode;
     fragment.querySelector(".deadline").textContent = formatDeadline(resource.deadline);
     fragment.querySelector(".offers").textContent = String(resource.offerCount);
-    fragment.querySelector(".winner").textContent = isClosed ? resource.allocatedTo : "Pending";
+    fragment.querySelector(".winner").textContent = closed ? resource.allocatedTo : "Pending";
 
     const badge = fragment.querySelector(".badge");
-    badge.textContent = isClosed ? `Allocated: ${resource.bestScore}` : resource.urgency;
-    badge.classList.toggle("closed", isClosed);
+    badge.textContent = closed ? `Allocated: ${resource.bestScore}` : resource.urgency;
+    badge.classList.toggle("closed", closed);
+
+    const button = fragment.querySelector(".request-button");
+    button.disabled = closed;
+    button.textContent = closed ? "Closed" : "Request this";
+    button.addEventListener("click", () => selectResource(resource.id));
 
     dom.resourceList.append(fragment);
   });
 
+  if (!dom.resourceList.children.length) {
+    const empty = document.createElement("p");
+    empty.className = "empty-state";
+    empty.textContent = "No matching resources found.";
+    dom.resourceList.append(empty);
+  }
+
+  if (!dom.resourceSelect.children.length) {
+    const option = document.createElement("option");
+    option.textContent = "No open listings";
+    option.value = "";
+    dom.resourceSelect.append(option);
+  }
+
   dom.activeCount.textContent = String(active);
   dom.offerCount.textContent = String(offerTotal);
+  dom.listedCount.textContent = String(state.resources.length);
 }
 
 function renderInternships() {
@@ -75,7 +123,7 @@ function renderInternships() {
     article.innerHTML = `
       <h3>${item.company}</h3>
       <p>${item.title}</p>
-      <p><strong>Deadline:</strong> ${item.deadline}</p>
+      <span>${item.deadline}</span>
     `;
     dom.internshipList.append(article);
   });
@@ -90,7 +138,7 @@ async function refreshData() {
   renderInternships();
 }
 
-dom.form.addEventListener("submit", async (event) => {
+dom.offerForm.addEventListener("submit", async (event) => {
   event.preventDefault();
 
   const payload = {
@@ -110,19 +158,59 @@ dom.form.addEventListener("submit", async (event) => {
   const data = await response.json();
 
   if (!response.ok) {
-    showStatus(data.error || "Offer could not be submitted.", true);
+    showStatus(dom.offerStatus, data.error || "Offer could not be submitted.", true);
     return;
   }
 
-  showStatus(`Offer accepted. Priority score: ${data.score}`);
+  showStatus(dom.offerStatus, `Offer accepted. Priority score: ${data.score}`);
+  await refreshData();
+});
+
+dom.listingForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+
+  const payload = {
+    title: document.querySelector("#listing-title").value.trim(),
+    owner: document.querySelector("#listing-owner").value.trim(),
+    type: document.querySelector("#listing-type").value,
+    mode: document.querySelector("#listing-mode").value,
+    urgency: document.querySelector("#listing-urgency").value,
+    durationMinutes: Number(document.querySelector("#listing-duration").value),
+    description: document.querySelector("#listing-description").value.trim()
+  };
+
+  const response = await fetch("/api/resources", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+  const data = await response.json();
+
+  if (!response.ok) {
+    showStatus(dom.listingStatus, data.error || "Resource could not be listed.", true);
+    return;
+  }
+
+  dom.listingForm.reset();
+  showStatus(dom.listingStatus, `Resource published. Listing ID: ${data.id}`);
   await refreshData();
 });
 
 dom.refresh.addEventListener("click", async () => {
   await refreshData();
-  showStatus("Listings refreshed. Expired resources are allocated automatically.");
+  showStatus(dom.offerStatus, "Listings refreshed.");
+});
+
+dom.search.addEventListener("input", () => {
+  state.search = dom.search.value;
+  renderResources();
+});
+
+dom.typeFilter.addEventListener("change", () => {
+  state.type = dom.typeFilter.value;
+  renderResources();
 });
 
 refreshData().catch(() => {
-  showStatus("Could not connect to the C++ backend.", true);
+  showStatus(dom.offerStatus, "Could not connect to the C++ backend.", true);
 });

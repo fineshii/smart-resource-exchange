@@ -5,9 +5,10 @@ Smart Resource Exchange is a DAA based web application for student resource shar
 ## What is included
 
 - C++ backend in `server.cpp`
-- File-backed database in `data/`
+- SQLite database in `data/smart_resource_exchange.sqlite`
 - Static frontend in `public/`
 - Resource listing dashboard
+- Student resource publishing form
 - Offer and bidding form
 - Deadline-based allocation
 - Priority score formula and greedy winner selection
@@ -39,15 +40,20 @@ Then open [http://localhost:3000](http://localhost:3000).
 
 ## Storage
 
-The backend stores app data in three simple database files:
+The backend stores app data in one SQLite database:
 
-- `data/resources.db`
-- `data/offers.db`
-- `data/internships.db`
+- `data/smart_resource_exchange.sqlite`
 
-These files are created automatically on first run. New offers are saved immediately, and the server reloads them when it starts again.
+It creates three SQL tables automatically on first run:
+
+- `resources`
+- `offers`
+- `internships`
+
+New resources and offers are saved immediately and remain available after restarting the server.
 
 ## API
 
 - `GET /api/resources`
+- `POST /api/resources`
 - `POST /api/offers`

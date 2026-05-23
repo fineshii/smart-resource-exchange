@@ -4,7 +4,7 @@
   "private": true,
   "description": "DAA based Smart Resource Exchange website with a C++ backend.",
   "scripts": {
-    "build": "g++ -std=c++11 server.cpp -o smart_exchange_server.exe -lws2_32",
+    "build": "g++ -std=c++11 server.cpp -x c vendor/sqlite-amalgamation-3530100/sqlite3.c -x c++ -Ivendor/sqlite-amalgamation-3530100 -D_WIN32_WINNT=0x0600 -o smart_exchange_server.exe -lws2_32",
     "start": ".\\smart_exchange_server.exe"
   }
 }

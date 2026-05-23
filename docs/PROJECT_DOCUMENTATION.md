@@ -4,13 +4,15 @@
 
 Smart Resource Exchange is a DAA based web application for students to share, exchange, or bid for academic resources such as books, calculators, notes, and lab materials.
 
-The core purpose is to demonstrate real algorithmic decision-making instead of first-come-first-serve allocation. The backend calculates offer priority, stores submitted offers, and allocates expired listings using a priority queue and greedy selection.
+The core purpose is to demonstrate real algorithmic decision-making instead of first-come-first-serve allocation. The backend calculates offer priority, stores submitted offers in SQLite, allows students to publish their own listings, and allocates expired listings using a priority queue and greedy selection.
 
 ## Modules
 
 ### Resource Management
 
 Students can view academic resources with owner, type, mode, urgency, deadline, offer count, and allocation status.
+
+Students can also publish their own resources by entering the title, owner name, type, mode, urgency, deadline window, and listing details.
 
 ### Offer and Bidding
 
@@ -48,13 +50,17 @@ O(n log n)
 
 ### Storage
 
-The C++ backend uses a small file-backed database in `data/`:
+The C++ backend uses a SQLite database in `data/`:
 
-- `resources.db`
-- `offers.db`
-- `internships.db`
+- `smart_resource_exchange.sqlite`
 
-These files are created automatically at runtime and are ignored by Git so local data does not leak into the repository.
+The database is created automatically at runtime and is ignored by Git so local data does not leak into the repository.
+
+Tables:
+
+- `resources`
+- `offers`
+- `internships`
 
 ## API
 
@@ -88,9 +94,27 @@ Example response:
 }
 ```
 
+### POST `/api/resources`
+
+Publishes a new student-owned resource listing.
+
+Example request:
+
+```json
+{
+  "title": "Engineering Drawing Kit",
+  "type": "Lab Material",
+  "owner": "Priya",
+  "description": "Available for first-year graphics practicals.",
+  "urgency": "Medium",
+  "mode": "Exchange",
+  "durationMinutes": 1440
+}
+```
+
 ## Technology Stack
 
 - Frontend: HTML, CSS, JavaScript
 - Backend: C++ with Winsock HTTP server
-- Storage: Local file-backed database
+- Storage: SQLite
 - Algorithm: Priority queue with greedy selection
