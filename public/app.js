@@ -22,6 +22,18 @@ const dom = {
   typeFilter: document.querySelector("#type-filter")
 };
 
+function openView(viewId) {
+  document.querySelectorAll("[data-view]").forEach((view) => {
+    view.classList.toggle("active", view.id === viewId);
+  });
+
+  document.querySelectorAll("[data-view-target]").forEach((control) => {
+    control.classList.toggle("active", control.dataset.viewTarget === viewId);
+  });
+
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
 function showStatus(element, message, isError = false) {
   element.textContent = message;
   element.classList.toggle("error", isError);
@@ -53,7 +65,7 @@ function filteredResources() {
 
 function selectResource(resourceId) {
   dom.resourceSelect.value = String(resourceId);
-  document.querySelector("#request").scrollIntoView({ behavior: "smooth", block: "start" });
+  openView("request");
 }
 
 function renderResources() {
@@ -209,6 +221,10 @@ dom.search.addEventListener("input", () => {
 dom.typeFilter.addEventListener("change", () => {
   state.type = dom.typeFilter.value;
   renderResources();
+});
+
+document.querySelectorAll("[data-view-target]").forEach((control) => {
+  control.addEventListener("click", () => openView(control.dataset.viewTarget));
 });
 
 refreshData().catch(() => {

@@ -9,127 +9,161 @@
 </head>
 <body>
   <header class="app-header">
-    <div>
-      <p class="eyebrow">Campus exchange desk</p>
-      <h1>Smart Resource Exchange</h1>
-    </div>
-    <nav aria-label="Primary navigation">
-      <a href="#market">Browse</a>
-      <a href="#request">Request</a>
-      <a href="#list-resource">List resource</a>
+    <button class="brand-button" type="button" data-view-target="dashboard" aria-label="Open dashboard">
+      <span>SR</span>
+      <strong>Smart Resource Exchange</strong>
+    </button>
+    <nav aria-label="Feature navigation">
+      <button class="nav-link active" type="button" data-view-target="dashboard">Dashboard</button>
+      <button class="nav-link" type="button" data-view-target="market">Browse</button>
+      <button class="nav-link" type="button" data-view-target="request">Request</button>
+      <button class="nav-link" type="button" data-view-target="list-resource">List</button>
+      <button class="nav-link" type="button" data-view-target="opportunities">Opportunities</button>
     </nav>
   </header>
 
   <main>
-    <section class="summary-strip" aria-label="Marketplace summary">
-      <article>
-        <span id="active-count">0</span>
-        <p>Open listings</p>
-      </article>
-      <article>
-        <span id="offer-count">0</span>
-        <p>Submitted offers</p>
-      </article>
-      <article>
-        <span id="listed-count">0</span>
-        <p>Total resources</p>
-      </article>
-      <article>
-        <span>SQLite</span>
-        <p>Persistent storage</p>
-      </article>
-    </section>
-
-    <section class="market-shell" id="market">
-      <aside class="sidebar">
-        <section class="panel">
-          <div class="section-head">
-            <p class="eyebrow">Find resources</p>
-            <h2>Marketplace</h2>
-          </div>
-          <label>
-            Search
-            <input id="search" type="search" placeholder="Book, calculator, notes">
-          </label>
-          <label>
-            Type
-            <select id="type-filter">
-              <option value="All">All resources</option>
-              <option value="Book">Books</option>
-              <option value="Calculator">Calculators</option>
-              <option value="Notes">Notes</option>
-              <option value="Lab Material">Lab materials</option>
-              <option value="Other">Other</option>
-            </select>
-          </label>
-          <button id="refresh-button" class="secondary-button" type="button">Refresh listings</button>
-        </section>
-
-        <section class="panel" id="request">
-          <div class="section-head">
-            <p class="eyebrow">Student request</p>
-            <h2>Make an offer</h2>
-          </div>
-          <form id="offer-form" class="form-stack">
-            <label>
-              Resource
-              <select id="resource-id" required></select>
-            </label>
-            <label>
-              Student name
-              <input id="student-name" type="text" value="Priya" required>
-            </label>
-            <div class="two-col">
-              <label>
-                Credit score
-                <input id="credits" type="number" min="0" max="100" value="18" required>
-              </label>
-              <label>
-                Urgency
-                <select id="urgency">
-                  <option value="High">High</option>
-                  <option value="Medium">Medium</option>
-                  <option value="Low">Low</option>
-                </select>
-              </label>
-            </div>
-            <div class="two-col">
-              <label>
-                Mode
-                <select id="mode">
-                  <option value="Exchange">Exchange</option>
-                  <option value="Bidding">Bidding</option>
-                </select>
-              </label>
-              <label>
-                Bid value
-                <input id="bid-value" type="number" min="0" value="0">
-              </label>
-            </div>
-            <button class="primary-button" type="submit">Submit offer</button>
-          </form>
-          <p id="offer-status" class="status hidden" aria-live="polite"></p>
-        </section>
-      </aside>
-
-      <section class="feed">
-        <div class="feed-head">
-          <div>
-            <p class="eyebrow">Live listings</p>
-            <h2>Resources available on campus</h2>
-          </div>
-          <span id="database-pill">SQL connected</span>
+    <section class="view active" id="dashboard" data-view>
+      <div class="dashboard-hero">
+        <div>
+          <p class="eyebrow">Campus exchange desk</p>
+          <h1>Choose a feature to start</h1>
+          <p class="hero-copy">Track resource listings, place offers, publish your own materials, and review opportunity deadlines from one dashboard.</p>
         </div>
-        <div id="resource-list" class="resource-list"></div>
+        <div class="hero-panel" aria-label="Marketplace summary">
+          <article>
+            <span id="active-count">0</span>
+            <p>Open listings</p>
+          </article>
+          <article>
+            <span id="offer-count">0</span>
+            <p>Submitted offers</p>
+          </article>
+          <article>
+            <span id="listed-count">0</span>
+            <p>Total resources</p>
+          </article>
+        </div>
+      </div>
+
+      <section class="feature-grid" aria-label="Available features">
+        <button class="feature-card market-card" type="button" data-view-target="market">
+          <span class="feature-icon">01</span>
+          <strong>Browse marketplace</strong>
+          <small>Search, filter, and choose available campus resources.</small>
+        </button>
+        <button class="feature-card request-card" type="button" data-view-target="request">
+          <span class="feature-icon">02</span>
+          <strong>Make an offer</strong>
+          <small>Send an exchange or bidding request with priority details.</small>
+        </button>
+        <button class="feature-card listing-card" type="button" data-view-target="list-resource">
+          <span class="feature-icon">03</span>
+          <strong>List a resource</strong>
+          <small>Publish books, notes, calculators, or lab materials.</small>
+        </button>
+        <button class="feature-card allocation-card" type="button" data-view-target="allocation">
+          <span class="feature-icon">04</span>
+          <strong>Allocation logic</strong>
+          <small>View the DAA scoring flow behind winner selection.</small>
+        </button>
+        <button class="feature-card opportunity-card" type="button" data-view-target="opportunities">
+          <span class="feature-icon">05</span>
+          <strong>Opportunities</strong>
+          <small>Check internships and scholarships in a dedicated view.</small>
+        </button>
       </section>
     </section>
 
-    <section class="lower-grid">
-      <section class="panel listing-panel" id="list-resource">
-        <div class="section-head">
-          <p class="eyebrow">List yours</p>
-          <h2>Add a resource</h2>
+    <section class="view" id="market" data-view>
+      <div class="view-head">
+        <div>
+          <p class="eyebrow">Live listings</p>
+          <h1>Marketplace</h1>
         </div>
+        <span id="database-pill">SQL connected</span>
+      </div>
+
+      <section class="tool-strip" aria-label="Marketplace controls">
+        <label>
+          Search
+          <input id="search" type="search" placeholder="Book, calculator, notes">
+        </label>
+        <label>
+          Type
+          <select id="type-filter">
+            <option value="All">All resources</option>
+            <option value="Book">Books</option>
+            <option value="Calculator">Calculators</option>
+            <option value="Notes">Notes</option>
+            <option value="Lab Material">Lab materials</option>
+            <option value="Other">Other</option>
+          </select>
+        </label>
+        <button id="refresh-button" class="secondary-button" type="button">Refresh listings</button>
+      </section>
+
+      <div id="resource-list" class="resource-list"></div>
+    </section>
+
+    <section class="view" id="request" data-view>
+      <div class="view-head">
+        <div>
+          <p class="eyebrow">Student request</p>
+          <h1>Make an offer</h1>
+        </div>
+      </div>
+      <section class="window-panel compact-window">
+        <form id="offer-form" class="form-stack">
+          <label>
+            Resource
+            <select id="resource-id" required></select>
+          </label>
+          <label>
+            Student name
+            <input id="student-name" type="text" value="Priya" required>
+          </label>
+          <div class="two-col">
+            <label>
+              Credit score
+              <input id="credits" type="number" min="0" max="100" value="18" required>
+            </label>
+            <label>
+              Urgency
+              <select id="urgency">
+                <option value="High">High</option>
+                <option value="Medium">Medium</option>
+                <option value="Low">Low</option>
+              </select>
+            </label>
+          </div>
+          <div class="two-col">
+            <label>
+              Mode
+              <select id="mode">
+                <option value="Exchange">Exchange</option>
+                <option value="Bidding">Bidding</option>
+              </select>
+            </label>
+            <label>
+              Bid value
+              <input id="bid-value" type="number" min="0" value="0">
+            </label>
+          </div>
+          <button class="primary-button" type="submit">Submit offer</button>
+        </form>
+        <p id="offer-status" class="status hidden" aria-live="polite"></p>
+      </section>
+    </section>
+
+    <section class="view" id="list-resource" data-view>
+      <div class="view-head">
+        <div>
+          <p class="eyebrow">List yours</p>
+          <h1>Add a resource</h1>
+        </div>
+      </div>
+      <section class="window-panel">
         <form id="listing-form" class="listing-grid">
           <label>
             Resource title
@@ -182,12 +216,16 @@
         </form>
         <p id="listing-status" class="status hidden" aria-live="polite"></p>
       </section>
+    </section>
 
-      <section class="panel">
-        <div class="section-head">
+    <section class="view" id="allocation" data-view>
+      <div class="view-head">
+        <div>
           <p class="eyebrow">Allocation queue</p>
-          <h2>How winners are picked</h2>
+          <h1>How winners are picked</h1>
         </div>
+      </div>
+      <section class="allocation-layout">
         <div class="formula">Priority = credits x 2 + urgency + bid</div>
         <div class="process-list">
           <span>Offer saved</span>
@@ -196,14 +234,16 @@
           <span>Highest score allocated</span>
         </div>
       </section>
+    </section>
 
-      <section class="panel">
-        <div class="section-head">
-          <p class="eyebrow">Opportunities</p>
-          <h2>Internships and scholarships</h2>
+    <section class="view" id="opportunities" data-view>
+      <div class="view-head">
+        <div>
+          <p class="eyebrow">Internships and scholarships</p>
+          <h1>Opportunity board</h1>
         </div>
-        <div id="internship-list" class="internship-list"></div>
-      </section>
+      </div>
+      <div id="internship-list" class="internship-list"></div>
     </section>
   </main>
 
