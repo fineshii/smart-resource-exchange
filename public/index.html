@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="theme-color" content="#f7f8fb">
+  <meta name="theme-color" content="#080b10">
   <title>Smart Resource Exchange</title>
   <link rel="stylesheet" href="styles.css">
 </head>
@@ -25,10 +25,15 @@
   <main>
     <section class="view active" id="dashboard" data-view>
       <div class="dashboard-hero">
-        <div>
-          <p class="eyebrow">Campus exchange desk</p>
-          <h1>Choose a feature to start</h1>
-          <p class="hero-copy">Track resource listings, place offers, publish your own materials, and review opportunity deadlines from one dashboard.</p>
+        <div class="hero-grid" aria-hidden="true"></div>
+        <div class="hero-content">
+          <p class="beta-pill">Now in campus beta</p>
+          <h1>Resource exchange that <span>thinks ahead</span></h1>
+          <p class="hero-copy">Smart Resource Exchange connects students, automates offer scoring, and helps useful materials reach the right person before deadlines close.</p>
+          <div class="hero-actions">
+            <button class="primary-button hero-cta" type="button" data-view-target="market">Start browsing</button>
+            <button class="secondary-button hero-cta" type="button" data-view-target="allocation">See how it works</button>
+          </div>
         </div>
         <div class="hero-panel" aria-label="Marketplace summary">
           <article>
@@ -45,6 +50,14 @@
           </article>
         </div>
       </div>
+
+      <section class="trusted-strip" aria-label="Trusted by campus teams">
+        <span>Trusted by forward-thinking students</span>
+        <strong>DAA Lab</strong>
+        <strong>Library Desk</strong>
+        <strong>Scholarship Cell</strong>
+        <strong>Resource Club</strong>
+      </section>
 
       <section class="feature-grid" aria-label="Available features">
         <button class="feature-card market-card" type="button" data-view-target="market">
@@ -72,6 +85,87 @@
           <strong>Opportunities</strong>
           <small>Check internships and scholarships in a dedicated view.</small>
         </button>
+      </section>
+
+      <section class="showcase-stack" aria-label="Product highlights">
+        <article class="showcase-row">
+          <div class="visual-panel node-visual" aria-hidden="true">
+            <span></span><span></span><span></span><span></span><span></span><span></span>
+          </div>
+          <div>
+            <p class="showcase-number">01</p>
+            <p class="eyebrow">Intelligent allocation</p>
+            <h2>Match resources in <span>minutes, not days</span></h2>
+            <p>Offers are scored with credits, urgency, and bidding mode so the highest priority request can be selected cleanly after the deadline.</p>
+          </div>
+        </article>
+        <article class="showcase-row reverse">
+          <div class="visual-panel wave-visual" aria-hidden="true"></div>
+          <div>
+            <p class="showcase-number">02</p>
+            <p class="eyebrow">Predictive clarity</p>
+            <h2>See what is open <span>before it closes</span></h2>
+            <p>Dashboard counts, listing filters, and deadline views keep students focused on active resources instead of digging through one long page.</p>
+          </div>
+        </article>
+        <article class="showcase-row">
+          <div class="visual-panel device-visual" aria-hidden="true">
+            <span></span><span></span><span></span>
+          </div>
+          <div>
+            <p class="showcase-number">03</p>
+            <p class="eyebrow">Unified workspace</p>
+            <h2>One surface for <span>everything that matters</span></h2>
+            <p>Browse listings, make offers, publish your own resource, and check opportunities from separate feature windows with normal browser navigation.</p>
+          </div>
+        </article>
+      </section>
+
+      <section class="scale-section" aria-label="Usage paths">
+        <p class="eyebrow">Simple paths</p>
+        <h2>Choose the flow that <span>fits your need</span></h2>
+        <div class="scale-grid">
+          <article>
+            <p>Borrow</p>
+            <strong>Find resources</strong>
+            <span>Search active listings and request the resource that fits your class or lab deadline.</span>
+            <button class="secondary-button" type="button" data-view-target="market">Browse</button>
+          </article>
+          <article class="popular-path">
+            <p>Exchange</p>
+            <strong>Submit offers</strong>
+            <span>Use credit score, urgency, exchange mode, and bid value to create a priority-based request.</span>
+            <button class="primary-button" type="button" data-view-target="request">Make offer</button>
+          </article>
+          <article>
+            <p>Publish</p>
+            <strong>List materials</strong>
+            <span>Add books, notes, calculators, and lab materials with deadlines and clear pickup details.</span>
+            <button class="secondary-button" type="button" data-view-target="list-resource">List resource</button>
+          </article>
+        </div>
+      </section>
+
+      <section class="testimonial-section" aria-label="Student feedback">
+        <p class="eyebrow">What students say</p>
+        <h2>Trusted by teams who <span>share faster</span></h2>
+        <div class="testimonial-grid">
+          <article>
+            <p>"The dashboard makes it obvious where to go. I can browse, request, and check deadlines without scrolling through everything."</p>
+            <strong>Anna Kim</strong>
+            <span>VP, Student Resource Cell</span>
+          </article>
+          <article>
+            <p>"The priority score makes allocation feel fair. It is easier to explain who gets a resource and why."</p>
+            <strong>Manas Desai</strong>
+            <span>Class Representative</span>
+          </article>
+          <article>
+            <p>"Listing lab material is quick, and the separate windows make the app feel much more professional."</p>
+            <strong>Sana Lin</strong>
+            <span>Lab Coordinator</span>
+          </article>
+        </div>
       </section>
     </section>
 
