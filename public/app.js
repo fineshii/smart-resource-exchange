@@ -87,7 +87,7 @@ function formatDeadline(value) {
 }
 
 function isOpen(resource) {
-  return resource.allocatedTo === "";
+  return resource.allocatedTo === "" && Date.now() < resource.deadline * 1000;
 }
 
 function filteredResources() {
@@ -132,7 +132,15 @@ function chooseEligibleUser(resource) {
 function syncOfferMode() {
   const resource = selectedResource();
   const user = resource ? chooseEligibleUser(resource) : selectedUser();
-  if (!resource || !user) return;
+  const submitButton = dom.offerForm.querySelector("button[type='submit']");
+  if (!resource || !user || !isOpen(resource)) {
+    document.querySelector("#credits").value = "0";
+    document.querySelector("#bid-value").value = "0";
+    document.querySelector("#bid-value").disabled = true;
+    submitButton.disabled = true;
+    showStatus(dom.walletStatus, "Choose an open listing to see wallet credits.");
+    return;
+  }
 
   const modeInput = document.querySelector("#mode");
   const bidInput = document.querySelector("#bid-value");
@@ -145,6 +153,7 @@ function syncOfferMode() {
   bidInput.disabled = resource.mode === "Exchange";
   bidInput.required = resource.mode === "Bidding";
   bidInput.max = String(user.availableCredits);
+  submitButton.disabled = false;
   if (resource.mode === "Exchange") {
     bidInput.value = "0";
   }
@@ -183,10 +192,10 @@ function renderResources() {
     fragment.querySelector(".mode").textContent = resource.mode;
     fragment.querySelector(".deadline").textContent = formatDeadline(resource.deadline);
     fragment.querySelector(".offers").textContent = String(resource.offerCount);
-    fragment.querySelector(".winner").textContent = closed ? resource.allocatedTo : "Pending";
+    fragment.querySelector(".winner").textContent = closed ? (resource.allocatedTo || "Closed") : "Pending";
 
     const badge = fragment.querySelector(".badge");
-    badge.textContent = closed ? `Allocated: ${resource.bestScore}` : resource.urgency;
+    badge.textContent = closed ? (resource.allocatedTo ? `Allocated: ${resource.bestScore}` : "Deadline passed") : resource.urgency;
     badge.classList.toggle("closed", closed);
 
     const button = fragment.querySelector(".request-button");

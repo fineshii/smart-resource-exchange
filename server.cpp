@@ -458,13 +458,13 @@ void seedData() {
 
   insertResource(aaravId, "DAA Reference Book", "Book", "Aarav",
     "Algorithms textbook available for two weeks. Best for exam preparation and project viva practice.",
-    "High", "Exchange", now + 90);
+    "High", "Exchange", now + (3 * 24 * 60 * 60));
   insertResource(meeraId, "Scientific Calculator", "Calculator", "Meera",
     "Casio scientific calculator available for the next lab cycle. Clean condition with working battery.",
-    "Medium", "Bidding", now + 160);
+    "Medium", "Bidding", now + (5 * 24 * 60 * 60));
   insertResource(rohanId, "Physics Lab Manual Notes", "Notes", "Rohan",
     "Clean handwritten readings and experiment observations for revision before practicals.",
-    "Low", "Exchange", now + 230);
+    "Low", "Exchange", now + (7 * 24 * 60 * 60));
 
   insertOffer(1, nishaId, "Nisha", 50, "High", "Exchange", 0, calculatePriorityScore(50, "High", 0, "Exchange"), 0, now - 40);
   insertOffer(1, kabirId, "Kabir", 50, "Medium", "Exchange", 0, calculatePriorityScore(50, "Medium", 0, "Exchange"), 0, now - 20);
