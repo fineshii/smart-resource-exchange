@@ -1,6 +1,8 @@
 const state = {
   resources: [],
   internships: [],
+  users: [],
+  semester: null,
   search: "",
   type: "All"
 };
@@ -12,6 +14,7 @@ const dom = {
   offerForm: document.querySelector("#offer-form"),
   listingForm: document.querySelector("#listing-form"),
   offerStatus: document.querySelector("#offer-status"),
+  walletStatus: document.querySelector("#wallet-status"),
   listingStatus: document.querySelector("#listing-status"),
   refresh: document.querySelector("#refresh-button"),
   activeCount: document.querySelector("#active-count"),
@@ -98,7 +101,59 @@ function filteredResources() {
 
 function selectResource(resourceId) {
   dom.resourceSelect.value = String(resourceId);
+  syncOfferMode();
   openView("request");
+}
+
+function selectedResource() {
+  const resourceId = Number(dom.resourceSelect.value);
+  return state.resources.find((resource) => resource.id === resourceId);
+}
+
+function selectedUser() {
+  const userName = document.querySelector("#student-name").value;
+  return state.users.find((user) => user.name === userName);
+}
+
+function chooseEligibleUser(resource) {
+  const userSelect = document.querySelector("#student-name");
+  const currentUser = selectedUser();
+  if (currentUser && currentUser.id !== resource.ownerUserId) {
+    return currentUser;
+  }
+
+  const nextUser = state.users.find((user) => user.id !== resource.ownerUserId);
+  if (nextUser) {
+    userSelect.value = nextUser.name;
+  }
+  return nextUser || currentUser;
+}
+
+function syncOfferMode() {
+  const resource = selectedResource();
+  const user = resource ? chooseEligibleUser(resource) : selectedUser();
+  if (!resource || !user) return;
+
+  const modeInput = document.querySelector("#mode");
+  const bidInput = document.querySelector("#bid-value");
+  const creditsInput = document.querySelector("#credits");
+  const walletScore = Math.min(user.availableCredits, 50);
+
+  modeInput.value = resource.mode;
+  modeInput.disabled = true;
+  creditsInput.value = String(walletScore);
+  bidInput.disabled = resource.mode === "Exchange";
+  bidInput.required = resource.mode === "Bidding";
+  bidInput.max = String(user.availableCredits);
+  if (resource.mode === "Exchange") {
+    bidInput.value = "0";
+  }
+
+  const semesterName = state.semester?.name || "active semester";
+  showStatus(
+    dom.walletStatus,
+    `${user.name}: ${user.availableCredits} available credits (${user.lockedCredits} locked) for ${semesterName}.`
+  );
 }
 
 function renderResources() {
@@ -156,6 +211,8 @@ function renderResources() {
     dom.resourceSelect.append(option);
   }
 
+  syncOfferMode();
+
   dom.activeCount.textContent = String(active);
   dom.offerCount.textContent = String(offerTotal);
   dom.listedCount.textContent = String(state.resources.length);
@@ -174,12 +231,34 @@ function renderInternships() {
   });
 }
 
+function renderUsers() {
+  const userSelect = document.querySelector("#student-name");
+  const previousValue = userSelect.value;
+  userSelect.innerHTML = "";
+
+  state.users.forEach((user) => {
+    const option = document.createElement("option");
+    option.value = user.name;
+    option.textContent = `${user.name} (${user.availableCredits} credits available)`;
+    userSelect.append(option);
+  });
+
+  if (state.users.some((user) => user.name === previousValue)) {
+    userSelect.value = previousValue;
+  }
+
+  syncOfferMode();
+}
+
 async function refreshData() {
   const response = await fetch("/api/resources");
   const payload = await response.json();
   state.resources = payload.resources || [];
   state.internships = payload.internships || [];
+  state.users = payload.users || [];
+  state.semester = payload.semester || null;
   renderResources();
+  renderUsers();
   renderInternships();
 }
 
@@ -189,7 +268,6 @@ dom.offerForm.addEventListener("submit", async (event) => {
   const payload = {
     resourceId: Number(dom.resourceSelect.value),
     studentName: document.querySelector("#student-name").value.trim(),
-    credits: Number(document.querySelector("#credits").value),
     urgency: document.querySelector("#urgency").value,
     mode: document.querySelector("#mode").value,
     bidValue: Number(document.querySelector("#bid-value").value)
@@ -207,7 +285,7 @@ dom.offerForm.addEventListener("submit", async (event) => {
     return;
   }
 
-  showStatus(dom.offerStatus, `Offer accepted. Priority score: ${data.score}`);
+  showStatus(dom.offerStatus, `Offer accepted. Priority score: ${data.score}. Available credits: ${data.availableCredits}`);
   await refreshData();
 });
 
@@ -255,6 +333,9 @@ dom.typeFilter.addEventListener("change", () => {
   state.type = dom.typeFilter.value;
   renderResources();
 });
+
+dom.resourceSelect.addEventListener("change", syncOfferMode);
+document.querySelector("#student-name").addEventListener("change", syncOfferMode);
 
 document.querySelectorAll("[data-view-target]").forEach((control) => {
   control.addEventListener("click", () => openView(control.dataset.viewTarget));

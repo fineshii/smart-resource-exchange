@@ -440,6 +440,13 @@ textarea::placeholder {
   color: rgba(242, 245, 251, 0.4);
 }
 
+input:disabled,
+select:disabled,
+input[readonly] {
+  color: rgba(242, 245, 251, 0.72);
+  background: rgba(255, 255, 255, 0.025);
+}
+
 textarea {
   resize: vertical;
 }

@@ -134,7 +134,7 @@
           <article class="popular-path">
             <p>Exchange</p>
             <strong>Submit offers</strong>
-            <span>Use credit score, urgency, exchange mode, and bid value to create a priority-based request.</span>
+            <span>Use wallet credits, urgency, exchange mode, and bid value to create a priority-based request.</span>
             <button class="primary-button" type="button" data-view-target="request">Make offer</button>
           </article>
           <article>
@@ -215,12 +215,12 @@
           </label>
           <label>
             Student name
-            <input id="student-name" type="text" value="Priya" required>
+            <select id="student-name" required></select>
           </label>
           <div class="two-col">
             <label>
-              Credit score
-              <input id="credits" type="number" min="0" max="100" value="18" required>
+              Wallet score used
+              <input id="credits" type="number" min="0" max="50" value="0" readonly>
             </label>
             <label>
               Urgency
@@ -240,12 +240,13 @@
               </select>
             </label>
             <label>
-              Bid value
+              Bid credits
               <input id="bid-value" type="number" min="0" value="0">
             </label>
           </div>
           <button class="primary-button" type="submit">Submit offer</button>
         </form>
+        <p id="wallet-status" class="status hidden" aria-live="polite"></p>
         <p id="offer-status" class="status hidden" aria-live="polite"></p>
       </section>
     </section>
@@ -320,7 +321,7 @@
         </div>
       </div>
       <section class="allocation-layout">
-        <div class="formula">Priority = credits x 2 + urgency + bid</div>
+        <div class="formula">Priority = wallet score x 2 + urgency + bid</div>
         <div class="process-list">
           <span>Offer saved</span>
           <span>Deadline checked</span>

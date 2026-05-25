@@ -17,18 +17,23 @@
 #pragma comment(lib, "ws2_32.lib")
 
 struct Offer {
+  int id;
   int resourceId;
+  int userId;
   std::string studentName;
   int credits;
   std::string urgency;
   std::string mode;
   int bidValue;
   int priorityScore;
+  int lockedCredits;
+  std::string status;
   std::time_t timestamp;
 };
 
 struct Resource {
   int id;
+  int ownerUserId;
   std::string title;
   std::string type;
   std::string owner;
@@ -47,8 +52,17 @@ struct Internship {
   std::string deadline;
 };
 
+struct User {
+  int id;
+  std::string name;
+  int creditBalance;
+  int lockedCredits;
+  int availableCredits;
+};
+
 std::vector<Resource> resources;
 std::vector<Internship> internships;
+std::vector<User> users;
 sqlite3* database = nullptr;
 CRITICAL_SECTION appLock;
 
@@ -77,6 +91,14 @@ int calculatePriorityScore(int credits, const std::string& urgency, int bidValue
   return (credits * 2) + urgencyWeight(urgency) + bidComponent;
 }
 
+bool isValidUrgency(const std::string& urgency) {
+  return urgency == "High" || urgency == "Medium" || urgency == "Low";
+}
+
+bool isValidMode(const std::string& mode) {
+  return mode == "Exchange" || mode == "Bidding";
+}
+
 std::string sqliteText(sqlite3_stmt* statement, int column) {
   const unsigned char* value = sqlite3_column_text(statement, column);
   return value ? reinterpret_cast<const char*>(value) : "";
@@ -92,6 +114,29 @@ bool executeSql(const std::string& sql) {
   return true;
 }
 
+bool columnExists(const std::string& tableName, const std::string& columnName) {
+  sqlite3_stmt* statement = nullptr;
+  std::string sql = "PRAGMA table_info(" + tableName + ")";
+  bool exists = false;
+  if (sqlite3_prepare_v2(database, sql.c_str(), -1, &statement, nullptr) == SQLITE_OK) {
+    while (sqlite3_step(statement) == SQLITE_ROW) {
+      if (sqliteText(statement, 1) == columnName) {
+        exists = true;
+        break;
+      }
+    }
+  }
+  sqlite3_finalize(statement);
+  return exists;
+}
+
+bool addColumnIfMissing(const std::string& tableName, const std::string& columnName, const std::string& definition) {
+  if (columnExists(tableName, columnName)) {
+    return true;
+  }
+  return executeSql("ALTER TABLE " + tableName + " ADD COLUMN " + columnName + " " + definition + ";");
+}
+
 void bindText(sqlite3_stmt* statement, int index, const std::string& value) {
   sqlite3_bind_text(statement, index, value.c_str(), -1, SQLITE_TRANSIENT);
 }
@@ -103,10 +148,11 @@ bool initDatabase() {
     return false;
   }
 
-  return executeSql(
+  bool ok = executeSql(
     "PRAGMA foreign_keys = ON;"
     "CREATE TABLE IF NOT EXISTS resources ("
     "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+    "  owner_user_id INTEGER DEFAULT 0,"
     "  title TEXT NOT NULL,"
     "  type TEXT NOT NULL,"
     "  owner TEXT NOT NULL,"
@@ -120,14 +166,42 @@ bool initDatabase() {
     "CREATE TABLE IF NOT EXISTS offers ("
     "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
     "  resource_id INTEGER NOT NULL,"
+    "  user_id INTEGER DEFAULT 0,"
     "  student_name TEXT NOT NULL,"
     "  credits INTEGER NOT NULL,"
     "  urgency TEXT NOT NULL,"
     "  mode TEXT NOT NULL,"
     "  bid_value INTEGER DEFAULT 0,"
     "  priority_score INTEGER NOT NULL,"
+    "  locked_credits INTEGER DEFAULT 0,"
+    "  status TEXT DEFAULT 'pending',"
     "  timestamp INTEGER NOT NULL,"
     "  FOREIGN KEY(resource_id) REFERENCES resources(id) ON DELETE CASCADE"
+    ");"
+    "CREATE TABLE IF NOT EXISTS users ("
+    "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+    "  name TEXT NOT NULL UNIQUE,"
+    "  credit_balance INTEGER NOT NULL DEFAULT 0,"
+    "  created_at INTEGER NOT NULL"
+    ");"
+    "CREATE TABLE IF NOT EXISTS semesters ("
+    "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+    "  name TEXT NOT NULL UNIQUE,"
+    "  starts_on TEXT NOT NULL,"
+    "  ends_on TEXT NOT NULL,"
+    "  credit_grant INTEGER NOT NULL,"
+    "  is_active INTEGER NOT NULL DEFAULT 0"
+    ");"
+    "CREATE TABLE IF NOT EXISTS credit_transactions ("
+    "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+    "  user_id INTEGER NOT NULL,"
+    "  semester_id INTEGER,"
+    "  resource_id INTEGER,"
+    "  offer_id INTEGER,"
+    "  amount INTEGER NOT NULL,"
+    "  reason TEXT NOT NULL,"
+    "  created_at INTEGER NOT NULL,"
+    "  FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE"
     ");"
     "CREATE TABLE IF NOT EXISTS internships ("
     "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
@@ -136,6 +210,12 @@ bool initDatabase() {
     "  deadline TEXT NOT NULL"
     ");"
   );
+
+  ok = ok && addColumnIfMissing("resources", "owner_user_id", "INTEGER DEFAULT 0");
+  ok = ok && addColumnIfMissing("offers", "user_id", "INTEGER DEFAULT 0");
+  ok = ok && addColumnIfMissing("offers", "locked_credits", "INTEGER DEFAULT 0");
+  ok = ok && addColumnIfMissing("offers", "status", "TEXT DEFAULT 'pending'");
+  return ok;
 }
 
 int tableCount(const std::string& tableName) {
@@ -150,60 +230,245 @@ int tableCount(const std::string& tableName) {
   return count;
 }
 
-void insertResource(const std::string& title, const std::string& type, const std::string& owner,
-                    const std::string& description, const std::string& urgency,
-                    const std::string& mode, std::time_t deadline) {
+int intQuery(const std::string& sql, int fallback = 0) {
+  sqlite3_stmt* statement = nullptr;
+  int value = fallback;
+  if (sqlite3_prepare_v2(database, sql.c_str(), -1, &statement, nullptr) == SQLITE_OK &&
+      sqlite3_step(statement) == SQLITE_ROW) {
+    value = sqlite3_column_int(statement, 0);
+  }
+  sqlite3_finalize(statement);
+  return value;
+}
+
+std::string activeSemesterName(std::time_t now) {
+  std::tm* local = std::localtime(&now);
+  int year = local ? local->tm_year + 1900 : 2026;
+  int month = local ? local->tm_mon + 1 : 1;
+  return month <= 6 ? "Spring " + std::to_string(year) : "Fall " + std::to_string(year);
+}
+
+void semesterDates(std::time_t now, std::string& startsOn, std::string& endsOn) {
+  std::tm* local = std::localtime(&now);
+  int year = local ? local->tm_year + 1900 : 2026;
+  int month = local ? local->tm_mon + 1 : 1;
+  if (month <= 6) {
+    startsOn = std::to_string(year) + "-01-01";
+    endsOn = std::to_string(year) + "-06-30";
+  } else {
+    startsOn = std::to_string(year) + "-07-01";
+    endsOn = std::to_string(year) + "-12-31";
+  }
+}
+
+int ensureActiveSemester() {
+  std::time_t now = std::time(nullptr);
+  std::string name = activeSemesterName(now);
+  sqlite3_stmt* statement = nullptr;
+  int semesterId = 0;
+
+  sqlite3_prepare_v2(database, "SELECT id FROM semesters WHERE name = ?", -1, &statement, nullptr);
+  bindText(statement, 1, name);
+  if (sqlite3_step(statement) == SQLITE_ROW) {
+    semesterId = sqlite3_column_int(statement, 0);
+  }
+  sqlite3_finalize(statement);
+
+  if (semesterId == 0) {
+    std::string startsOn;
+    std::string endsOn;
+    semesterDates(now, startsOn, endsOn);
+    sqlite3_prepare_v2(database,
+      "INSERT INTO semesters(name, starts_on, ends_on, credit_grant, is_active) VALUES (?, ?, ?, 100, 1)",
+      -1, &statement, nullptr);
+    bindText(statement, 1, name);
+    bindText(statement, 2, startsOn);
+    bindText(statement, 3, endsOn);
+    sqlite3_step(statement);
+    sqlite3_finalize(statement);
+    semesterId = static_cast<int>(sqlite3_last_insert_rowid(database));
+  }
+
+  executeSql("UPDATE semesters SET is_active = 0 WHERE id != " + std::to_string(semesterId));
+  executeSql("UPDATE semesters SET is_active = 1 WHERE id = " + std::to_string(semesterId));
+  return semesterId;
+}
+
+void recordCreditTransaction(int userId, int semesterId, int resourceId, int offerId,
+                             int amount, const std::string& reason) {
   sqlite3_stmt* statement = nullptr;
   sqlite3_prepare_v2(database,
-    "INSERT INTO resources(title, type, owner, description, urgency, mode, deadline, allocated_to, best_score) "
-    "VALUES (?, ?, ?, ?, ?, ?, ?, '', 0)",
+    "INSERT INTO credit_transactions(user_id, semester_id, resource_id, offer_id, amount, reason, created_at) "
+    "VALUES (?, ?, ?, ?, ?, ?, ?)",
     -1, &statement, nullptr);
-  bindText(statement, 1, title);
-  bindText(statement, 2, type);
-  bindText(statement, 3, owner);
-  bindText(statement, 4, description);
-  bindText(statement, 5, urgency);
-  bindText(statement, 6, mode);
-  sqlite3_bind_int64(statement, 7, static_cast<sqlite3_int64>(deadline));
+  sqlite3_bind_int(statement, 1, userId);
+  if (semesterId > 0) sqlite3_bind_int(statement, 2, semesterId);
+  else sqlite3_bind_null(statement, 2);
+  if (resourceId > 0) sqlite3_bind_int(statement, 3, resourceId);
+  else sqlite3_bind_null(statement, 3);
+  if (offerId > 0) sqlite3_bind_int(statement, 4, offerId);
+  else sqlite3_bind_null(statement, 4);
+  sqlite3_bind_int(statement, 5, amount);
+  bindText(statement, 6, reason);
+  sqlite3_bind_int64(statement, 7, static_cast<sqlite3_int64>(std::time(nullptr)));
   sqlite3_step(statement);
   sqlite3_finalize(statement);
 }
 
-void insertOffer(int resourceId, const std::string& studentName, int credits, const std::string& urgency,
-                 const std::string& mode, int bidValue, int priorityScore, std::time_t timestamp) {
+void adjustUserCredits(int userId, int amount) {
   sqlite3_stmt* statement = nullptr;
   sqlite3_prepare_v2(database,
-    "INSERT INTO offers(resource_id, student_name, credits, urgency, mode, bid_value, priority_score, timestamp) "
-    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    "UPDATE users SET credit_balance = credit_balance + ? WHERE id = ?",
+    -1, &statement, nullptr);
+  sqlite3_bind_int(statement, 1, amount);
+  sqlite3_bind_int(statement, 2, userId);
+  sqlite3_step(statement);
+  sqlite3_finalize(statement);
+}
+
+int findUserId(const std::string& name) {
+  sqlite3_stmt* statement = nullptr;
+  int userId = 0;
+  sqlite3_prepare_v2(database, "SELECT id FROM users WHERE name = ?", -1, &statement, nullptr);
+  bindText(statement, 1, name);
+  if (sqlite3_step(statement) == SQLITE_ROW) {
+    userId = sqlite3_column_int(statement, 0);
+  }
+  sqlite3_finalize(statement);
+  return userId;
+}
+
+void ensureSemesterGrant(int userId) {
+  int semesterId = ensureActiveSemester();
+  sqlite3_stmt* statement = nullptr;
+  int alreadyGranted = 0;
+  sqlite3_prepare_v2(database,
+    "SELECT COUNT(*) FROM credit_transactions WHERE user_id = ? AND semester_id = ? AND reason = 'semester_grant'",
+    -1, &statement, nullptr);
+  sqlite3_bind_int(statement, 1, userId);
+  sqlite3_bind_int(statement, 2, semesterId);
+  if (sqlite3_step(statement) == SQLITE_ROW) {
+    alreadyGranted = sqlite3_column_int(statement, 0);
+  }
+  sqlite3_finalize(statement);
+
+  if (alreadyGranted == 0) {
+    int grant = intQuery("SELECT credit_grant FROM semesters WHERE id = " + std::to_string(semesterId), 100);
+    adjustUserCredits(userId, grant);
+    recordCreditTransaction(userId, semesterId, 0, 0, grant, "semester_grant");
+  }
+}
+
+int ensureUser(const std::string& name) {
+  int userId = findUserId(name);
+  if (userId == 0) {
+    sqlite3_stmt* statement = nullptr;
+    sqlite3_prepare_v2(database,
+      "INSERT INTO users(name, credit_balance, created_at) VALUES (?, 0, ?)",
+      -1, &statement, nullptr);
+    bindText(statement, 1, name);
+    sqlite3_bind_int64(statement, 2, static_cast<sqlite3_int64>(std::time(nullptr)));
+    sqlite3_step(statement);
+    sqlite3_finalize(statement);
+    userId = static_cast<int>(sqlite3_last_insert_rowid(database));
+  }
+  ensureSemesterGrant(userId);
+  return userId;
+}
+
+int lockedCreditsForUser(int userId) {
+  sqlite3_stmt* statement = nullptr;
+  int locked = 0;
+  sqlite3_prepare_v2(database,
+    "SELECT COALESCE(SUM(locked_credits), 0) FROM offers WHERE user_id = ? AND status = 'pending'",
+    -1, &statement, nullptr);
+  sqlite3_bind_int(statement, 1, userId);
+  if (sqlite3_step(statement) == SQLITE_ROW) {
+    locked = sqlite3_column_int(statement, 0);
+  }
+  sqlite3_finalize(statement);
+  return locked;
+}
+
+int creditBalanceForUser(int userId) {
+  sqlite3_stmt* statement = nullptr;
+  int balance = 0;
+  sqlite3_prepare_v2(database, "SELECT credit_balance FROM users WHERE id = ?", -1, &statement, nullptr);
+  sqlite3_bind_int(statement, 1, userId);
+  if (sqlite3_step(statement) == SQLITE_ROW) {
+    balance = sqlite3_column_int(statement, 0);
+  }
+  sqlite3_finalize(statement);
+  return balance;
+}
+
+int availableCreditsForUser(int userId) {
+  return creditBalanceForUser(userId) - lockedCreditsForUser(userId);
+}
+
+void insertResource(int ownerUserId, const std::string& title, const std::string& type, const std::string& owner,
+                    const std::string& description, const std::string& urgency,
+                    const std::string& mode, std::time_t deadline) {
+  sqlite3_stmt* statement = nullptr;
+  sqlite3_prepare_v2(database,
+    "INSERT INTO resources(owner_user_id, title, type, owner, description, urgency, mode, deadline, allocated_to, best_score) "
+    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, '', 0)",
+    -1, &statement, nullptr);
+  sqlite3_bind_int(statement, 1, ownerUserId);
+  bindText(statement, 2, title);
+  bindText(statement, 3, type);
+  bindText(statement, 4, owner);
+  bindText(statement, 5, description);
+  bindText(statement, 6, urgency);
+  bindText(statement, 7, mode);
+  sqlite3_bind_int64(statement, 8, static_cast<sqlite3_int64>(deadline));
+  sqlite3_step(statement);
+  sqlite3_finalize(statement);
+}
+
+void insertOffer(int resourceId, int userId, const std::string& studentName, int credits, const std::string& urgency,
+                 const std::string& mode, int bidValue, int priorityScore, int lockedCredits, std::time_t timestamp) {
+  sqlite3_stmt* statement = nullptr;
+  sqlite3_prepare_v2(database,
+    "INSERT INTO offers(resource_id, user_id, student_name, credits, urgency, mode, bid_value, priority_score, locked_credits, status, timestamp) "
+    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)",
     -1, &statement, nullptr);
   sqlite3_bind_int(statement, 1, resourceId);
-  bindText(statement, 2, studentName);
-  sqlite3_bind_int(statement, 3, credits);
-  bindText(statement, 4, urgency);
-  bindText(statement, 5, mode);
-  sqlite3_bind_int(statement, 6, bidValue);
-  sqlite3_bind_int(statement, 7, priorityScore);
-  sqlite3_bind_int64(statement, 8, static_cast<sqlite3_int64>(timestamp));
+  sqlite3_bind_int(statement, 2, userId);
+  bindText(statement, 3, studentName);
+  sqlite3_bind_int(statement, 4, credits);
+  bindText(statement, 5, urgency);
+  bindText(statement, 6, mode);
+  sqlite3_bind_int(statement, 7, bidValue);
+  sqlite3_bind_int(statement, 8, priorityScore);
+  sqlite3_bind_int(statement, 9, lockedCredits);
+  sqlite3_bind_int64(statement, 10, static_cast<sqlite3_int64>(timestamp));
   sqlite3_step(statement);
   sqlite3_finalize(statement);
 }
 
 void seedData() {
   std::time_t now = std::time(nullptr);
+  int aaravId = ensureUser("Aarav");
+  int meeraId = ensureUser("Meera");
+  int rohanId = ensureUser("Rohan");
+  int nishaId = ensureUser("Nisha");
+  int kabirId = ensureUser("Kabir");
+  int ishaId = ensureUser("Isha");
 
-  insertResource("DAA Reference Book", "Book", "Aarav",
+  insertResource(aaravId, "DAA Reference Book", "Book", "Aarav",
     "Algorithms textbook available for two weeks. Best for exam preparation and project viva practice.",
     "High", "Exchange", now + 90);
-  insertResource("Scientific Calculator", "Calculator", "Meera",
+  insertResource(meeraId, "Scientific Calculator", "Calculator", "Meera",
     "Casio scientific calculator available for the next lab cycle. Clean condition with working battery.",
     "Medium", "Bidding", now + 160);
-  insertResource("Physics Lab Manual Notes", "Notes", "Rohan",
+  insertResource(rohanId, "Physics Lab Manual Notes", "Notes", "Rohan",
     "Clean handwritten readings and experiment observations for revision before practicals.",
     "Low", "Exchange", now + 230);
 
-  insertOffer(1, "Nisha", 16, "High", "Exchange", 0, calculatePriorityScore(16, "High", 0, "Exchange"), now - 40);
-  insertOffer(1, "Kabir", 22, "Medium", "Exchange", 0, calculatePriorityScore(22, "Medium", 0, "Exchange"), now - 20);
-  insertOffer(2, "Isha", 11, "Medium", "Bidding", 45, calculatePriorityScore(11, "Medium", 45, "Bidding"), now - 15);
+  insertOffer(1, nishaId, "Nisha", 50, "High", "Exchange", 0, calculatePriorityScore(50, "High", 0, "Exchange"), 0, now - 40);
+  insertOffer(1, kabirId, "Kabir", 50, "Medium", "Exchange", 0, calculatePriorityScore(50, "Medium", 0, "Exchange"), 0, now - 20);
+  insertOffer(2, ishaId, "Isha", 50, "Medium", "Bidding", 45, calculatePriorityScore(50, "Medium", 45, "Bidding"), 45, now - 15);
 
   executeSql(
     "INSERT INTO internships(company, title, deadline) VALUES "
@@ -219,47 +484,106 @@ void ensureSeedData() {
   }
 }
 
+void migrateLegacyUsers() {
+  sqlite3_stmt* statement = nullptr;
+  sqlite3_prepare_v2(database, "SELECT id, owner FROM resources WHERE owner_user_id = 0", -1, &statement, nullptr);
+  std::vector<std::pair<int, std::string>> resourceOwners;
+  while (sqlite3_step(statement) == SQLITE_ROW) {
+    resourceOwners.push_back({sqlite3_column_int(statement, 0), sqliteText(statement, 1)});
+  }
+  sqlite3_finalize(statement);
+
+  for (const auto& item : resourceOwners) {
+    int userId = ensureUser(item.second);
+    sqlite3_stmt* update = nullptr;
+    sqlite3_prepare_v2(database, "UPDATE resources SET owner_user_id = ? WHERE id = ?", -1, &update, nullptr);
+    sqlite3_bind_int(update, 1, userId);
+    sqlite3_bind_int(update, 2, item.first);
+    sqlite3_step(update);
+    sqlite3_finalize(update);
+  }
+
+  sqlite3_prepare_v2(database, "SELECT id, student_name, mode, bid_value, status FROM offers WHERE user_id = 0", -1, &statement, nullptr);
+  struct LegacyOfferUpdate {
+    int offerId;
+    int userId;
+    int lockedCredits;
+    std::string status;
+  };
+  std::vector<LegacyOfferUpdate> offerUpdates;
+  while (sqlite3_step(statement) == SQLITE_ROW) {
+    int offerId = sqlite3_column_int(statement, 0);
+    std::string studentName = sqliteText(statement, 1);
+    std::string mode = sqliteText(statement, 2);
+    int bidValue = sqlite3_column_int(statement, 3);
+    std::string status = sqliteText(statement, 4);
+    if (status.empty()) status = "pending";
+    int lockedCredits = mode == "Bidding" && status == "pending" ? bidValue : 0;
+    offerUpdates.push_back({offerId, ensureUser(studentName), lockedCredits, status});
+  }
+  sqlite3_finalize(statement);
+
+  for (const LegacyOfferUpdate& item : offerUpdates) {
+    sqlite3_stmt* update = nullptr;
+    sqlite3_prepare_v2(database,
+      "UPDATE offers SET user_id = ?, locked_credits = ?, status = ? WHERE id = ?",
+      -1, &update, nullptr);
+    sqlite3_bind_int(update, 1, item.userId);
+    sqlite3_bind_int(update, 2, item.lockedCredits);
+    bindText(update, 3, item.status);
+    sqlite3_bind_int(update, 4, item.offerId);
+    sqlite3_step(update);
+    sqlite3_finalize(update);
+  }
+}
+
 void loadData() {
   resources.clear();
   internships.clear();
+  users.clear();
 
   sqlite3_stmt* statement = nullptr;
   sqlite3_prepare_v2(database,
-    "SELECT id, title, type, owner, description, urgency, mode, deadline, allocated_to, best_score "
+    "SELECT id, owner_user_id, title, type, owner, description, urgency, mode, deadline, allocated_to, best_score "
     "FROM resources ORDER BY allocated_to = '', deadline ASC, id ASC",
     -1, &statement, nullptr);
 
   while (sqlite3_step(statement) == SQLITE_ROW) {
     Resource resource;
     resource.id = sqlite3_column_int(statement, 0);
-    resource.title = sqliteText(statement, 1);
-    resource.type = sqliteText(statement, 2);
-    resource.owner = sqliteText(statement, 3);
-    resource.description = sqliteText(statement, 4);
-    resource.urgency = sqliteText(statement, 5);
-    resource.mode = sqliteText(statement, 6);
-    resource.deadline = static_cast<std::time_t>(sqlite3_column_int64(statement, 7));
-    resource.allocatedTo = sqliteText(statement, 8);
-    resource.bestScore = sqlite3_column_int(statement, 9);
+    resource.ownerUserId = sqlite3_column_int(statement, 1);
+    resource.title = sqliteText(statement, 2);
+    resource.type = sqliteText(statement, 3);
+    resource.owner = sqliteText(statement, 4);
+    resource.description = sqliteText(statement, 5);
+    resource.urgency = sqliteText(statement, 6);
+    resource.mode = sqliteText(statement, 7);
+    resource.deadline = static_cast<std::time_t>(sqlite3_column_int64(statement, 8));
+    resource.allocatedTo = sqliteText(statement, 9);
+    resource.bestScore = sqlite3_column_int(statement, 10);
     resources.push_back(resource);
   }
   sqlite3_finalize(statement);
 
   sqlite3_prepare_v2(database,
-    "SELECT resource_id, student_name, credits, urgency, mode, bid_value, priority_score, timestamp "
+    "SELECT id, resource_id, user_id, student_name, credits, urgency, mode, bid_value, priority_score, locked_credits, status, timestamp "
     "FROM offers ORDER BY timestamp ASC",
     -1, &statement, nullptr);
 
   while (sqlite3_step(statement) == SQLITE_ROW) {
     Offer offer;
-    offer.resourceId = sqlite3_column_int(statement, 0);
-    offer.studentName = sqliteText(statement, 1);
-    offer.credits = sqlite3_column_int(statement, 2);
-    offer.urgency = sqliteText(statement, 3);
-    offer.mode = sqliteText(statement, 4);
-    offer.bidValue = sqlite3_column_int(statement, 5);
-    offer.priorityScore = sqlite3_column_int(statement, 6);
-    offer.timestamp = static_cast<std::time_t>(sqlite3_column_int64(statement, 7));
+    offer.id = sqlite3_column_int(statement, 0);
+    offer.resourceId = sqlite3_column_int(statement, 1);
+    offer.userId = sqlite3_column_int(statement, 2);
+    offer.studentName = sqliteText(statement, 3);
+    offer.credits = sqlite3_column_int(statement, 4);
+    offer.urgency = sqliteText(statement, 5);
+    offer.mode = sqliteText(statement, 6);
+    offer.bidValue = sqlite3_column_int(statement, 7);
+    offer.priorityScore = sqlite3_column_int(statement, 8);
+    offer.lockedCredits = sqlite3_column_int(statement, 9);
+    offer.status = sqliteText(statement, 10);
+    offer.timestamp = static_cast<std::time_t>(sqlite3_column_int64(statement, 11));
 
     auto it = std::find_if(resources.begin(), resources.end(), [&offer](const Resource& resource) {
       return resource.id == offer.resourceId;
@@ -277,6 +601,20 @@ void loadData() {
     internships.push_back({sqliteText(statement, 0), sqliteText(statement, 1), sqliteText(statement, 2)});
   }
   sqlite3_finalize(statement);
+
+  sqlite3_prepare_v2(database,
+    "SELECT id, name, credit_balance FROM users ORDER BY name ASC",
+    -1, &statement, nullptr);
+  while (sqlite3_step(statement) == SQLITE_ROW) {
+    User user;
+    user.id = sqlite3_column_int(statement, 0);
+    user.name = sqliteText(statement, 1);
+    user.creditBalance = sqlite3_column_int(statement, 2);
+    user.lockedCredits = lockedCreditsForUser(user.id);
+    user.availableCredits = user.creditBalance - user.lockedCredits;
+    users.push_back(user);
+  }
+  sqlite3_finalize(statement);
 }
 
 void updateAllocation(int resourceId, const std::string& allocatedTo, int bestScore) {
@@ -287,6 +625,18 @@ void updateAllocation(int resourceId, const std::string& allocatedTo, int bestSc
   bindText(statement, 1, allocatedTo);
   sqlite3_bind_int(statement, 2, bestScore);
   sqlite3_bind_int(statement, 3, resourceId);
+  sqlite3_step(statement);
+  sqlite3_finalize(statement);
+}
+
+void updateOfferStatus(int offerId, const std::string& status, int lockedCredits) {
+  sqlite3_stmt* statement = nullptr;
+  sqlite3_prepare_v2(database,
+    "UPDATE offers SET status = ?, locked_credits = ? WHERE id = ?",
+    -1, &statement, nullptr);
+  bindText(statement, 1, status);
+  sqlite3_bind_int(statement, 2, lockedCredits);
+  sqlite3_bind_int(statement, 3, offerId);
   sqlite3_step(statement);
   sqlite3_finalize(statement);
 }
@@ -309,13 +659,38 @@ bool allocateExpiredResources() {
 
     std::priority_queue<Offer, std::vector<Offer>, decltype(compare)> heap(compare);
     for (const Offer& offer : resource.offers) {
-      heap.push(offer);
+      if (offer.status == "pending") {
+        heap.push(offer);
+      }
+    }
+
+    if (heap.empty()) {
+      continue;
     }
 
     Offer winner = heap.top();
     resource.allocatedTo = winner.studentName;
     resource.bestScore = winner.priorityScore;
     updateAllocation(resource.id, winner.studentName, winner.priorityScore);
+
+    for (const Offer& offer : resource.offers) {
+      if (offer.status != "pending") {
+        continue;
+      }
+      if (offer.id == winner.id) {
+        updateOfferStatus(offer.id, "won", 0);
+        if (offer.mode == "Bidding" && offer.lockedCredits > 0 && offer.userId > 0 && resource.ownerUserId > 0) {
+          adjustUserCredits(offer.userId, -offer.lockedCredits);
+          adjustUserCredits(resource.ownerUserId, offer.lockedCredits);
+          recordCreditTransaction(offer.userId, ensureActiveSemester(), resource.id, offer.id,
+                                  -offer.lockedCredits, "winning_bid_paid");
+          recordCreditTransaction(resource.ownerUserId, ensureActiveSemester(), resource.id, offer.id,
+                                  offer.lockedCredits, "sale_received");
+        }
+      } else {
+        updateOfferStatus(offer.id, "lost", 0);
+      }
+    }
     changed = true;
   }
 
@@ -335,6 +710,7 @@ std::string resourcesJson() {
     if (i) json << ",";
     json << "{"
          << "\"id\":" << r.id << ","
+         << "\"ownerUserId\":" << r.ownerUserId << ","
          << "\"title\":\"" << escapeJson(r.title) << "\","
          << "\"type\":\"" << escapeJson(r.type) << "\","
          << "\"owner\":\"" << escapeJson(r.owner) << "\","
@@ -348,7 +724,36 @@ std::string resourcesJson() {
          << "}";
   }
 
-  json << "],\"internships\":[";
+  json << "],\"users\":[";
+  for (size_t i = 0; i < users.size(); ++i) {
+    const User& user = users[i];
+    if (i) json << ",";
+    json << "{"
+         << "\"id\":" << user.id << ","
+         << "\"name\":\"" << escapeJson(user.name) << "\","
+         << "\"creditBalance\":" << user.creditBalance << ","
+         << "\"lockedCredits\":" << user.lockedCredits << ","
+         << "\"availableCredits\":" << user.availableCredits
+         << "}";
+  }
+
+  int semesterId = ensureActiveSemester();
+  std::string semesterName;
+  int semesterGrant = 100;
+  sqlite3_stmt* semesterStatement = nullptr;
+  sqlite3_prepare_v2(database, "SELECT name, credit_grant FROM semesters WHERE id = ?", -1, &semesterStatement, nullptr);
+  sqlite3_bind_int(semesterStatement, 1, semesterId);
+  if (sqlite3_step(semesterStatement) == SQLITE_ROW) {
+    semesterName = sqliteText(semesterStatement, 0);
+    semesterGrant = sqlite3_column_int(semesterStatement, 1);
+  }
+  sqlite3_finalize(semesterStatement);
+
+  json << "],\"semester\":{"
+       << "\"id\":" << semesterId << ","
+       << "\"name\":\"" << escapeJson(semesterName) << "\","
+       << "\"creditGrant\":" << semesterGrant
+       << "},\"internships\":[";
   for (size_t i = 0; i < internships.size(); ++i) {
     const Internship& item = internships[i];
     if (i) json << ",";
@@ -380,7 +785,6 @@ std::string submitOffer(const std::string& body, int& statusCode) {
 
   int resourceId = parseIntField(body, "resourceId");
   std::string studentName = parseStringField(body, "studentName");
-  int credits = parseIntField(body, "credits");
   std::string urgency = parseStringField(body, "urgency");
   std::string mode = parseStringField(body, "mode");
   int bidValue = parseIntField(body, "bidValue");
@@ -388,6 +792,21 @@ std::string submitOffer(const std::string& body, int& statusCode) {
   if (studentName.empty() || resourceId <= 0) {
     statusCode = 400;
     return "{\"error\":\"Student name and resource are required.\"}";
+  }
+
+  if (!isValidUrgency(urgency)) {
+    statusCode = 400;
+    return "{\"error\":\"Urgency must be High, Medium, or Low.\"}";
+  }
+
+  if (!isValidMode(mode)) {
+    statusCode = 400;
+    return "{\"error\":\"Offer mode must be Exchange or Bidding.\"}";
+  }
+
+  if (bidValue < 0 || bidValue > 10000) {
+    statusCode = 400;
+    return "{\"error\":\"Bid value must be between 0 and 10000.\"}";
   }
 
   auto it = std::find_if(resources.begin(), resources.end(), [resourceId](const Resource& resource) {
@@ -399,17 +818,55 @@ std::string submitOffer(const std::string& body, int& statusCode) {
     return "{\"error\":\"Resource not found.\"}";
   }
 
+  int userId = ensureUser(studentName);
+  int availableCredits = availableCreditsForUser(userId);
+
+  if (it->ownerUserId == userId) {
+    statusCode = 400;
+    return "{\"error\":\"You cannot make an offer on your own resource.\"}";
+  }
+
   if (!it->allocatedTo.empty() || std::time(nullptr) >= it->deadline) {
     statusCode = 409;
     return "{\"error\":\"Deadline has passed. This resource is already closed.\"}";
   }
 
-  int score = calculatePriorityScore(credits, urgency, bidValue, mode);
-  insertOffer(resourceId, studentName, credits, urgency, mode, bidValue, score, std::time(nullptr));
+  if (mode != it->mode) {
+    statusCode = 400;
+    return "{\"error\":\"Offer mode must match the resource exchange mode.\"}";
+  }
+
+  if (mode == "Exchange" && bidValue != 0) {
+    statusCode = 400;
+    return "{\"error\":\"Exchange offers cannot include a bid value.\"}";
+  }
+
+  if (mode == "Bidding" && bidValue == 0) {
+    statusCode = 400;
+    return "{\"error\":\"Bidding offers must include a bid value greater than zero.\"}";
+  }
+
+  if (mode == "Bidding" && bidValue > availableCredits) {
+    statusCode = 400;
+    return "{\"error\":\"Bid exceeds the student's available credits.\"}";
+  }
+
+  for (const Offer& offer : it->offers) {
+    if (offer.userId == userId && offer.status == "pending") {
+      statusCode = 409;
+      return "{\"error\":\"This student already has a pending offer for this resource.\"}";
+    }
+  }
+
+  int creditScore = std::min(availableCredits, 50);
+  int lockedCredits = mode == "Bidding" ? bidValue : 0;
+  int score = calculatePriorityScore(creditScore, urgency, bidValue, mode);
+  insertOffer(resourceId, userId, studentName, creditScore, urgency, mode, bidValue, score, lockedCredits, std::time(nullptr));
 
   statusCode = 201;
   std::ostringstream response;
-  response << "{\"ok\":true,\"score\":" << score << "}";
+  response << "{\"ok\":true,\"score\":" << score
+           << ",\"availableCredits\":" << availableCredits - lockedCredits << "}";
   return response.str();
 }
 
@@ -427,18 +884,19 @@ std::string createResource(const std::string& body, int& statusCode) {
     return "{\"error\":\"Title, type, owner, and description are required.\"}";
   }
 
-  if (urgency != "High" && urgency != "Medium" && urgency != "Low") {
+  if (!isValidUrgency(urgency)) {
     urgency = "Medium";
   }
-  if (mode != "Exchange" && mode != "Bidding") {
+  if (!isValidMode(mode)) {
     mode = "Exchange";
   }
   if (durationMinutes < 5) {
     durationMinutes = 5;
   }
 
+  int ownerUserId = ensureUser(owner);
   std::time_t deadline = std::time(nullptr) + (durationMinutes * 60);
-  insertResource(title, type, owner, description, urgency, mode, deadline);
+  insertResource(ownerUserId, title, type, owner, description, urgency, mode, deadline);
 
   statusCode = 201;
   std::ostringstream response;
@@ -571,6 +1029,7 @@ int main() {
     return 1;
   }
   ensureSeedData();
+  migrateLegacyUsers();
 
   WSADATA data;
   if (WSAStartup(MAKEWORD(2, 2), &data) != 0) {
