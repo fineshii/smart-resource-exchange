@@ -22,7 +22,30 @@ const dom = {
   typeFilter: document.querySelector("#type-filter")
 };
 
-function openView(viewId) {
+function isKnownView(viewId) {
+  return Boolean(document.getElementById(viewId));
+}
+
+function viewFromLocation() {
+  const viewId = window.location.hash.replace("#", "");
+  return isKnownView(viewId) ? viewId : "dashboard";
+}
+
+function viewUrl(viewId) {
+  const url = new URL(window.location.href);
+  url.hash = viewId === "dashboard" ? "" : viewId;
+  return url;
+}
+
+function openView(viewId, options = {}) {
+  if (!isKnownView(viewId)) return;
+
+  const settings = {
+    updateHistory: true,
+    scroll: true,
+    ...options
+  };
+
   document.querySelectorAll("[data-view]").forEach((view) => {
     view.classList.toggle("active", view.id === viewId);
   });
@@ -31,7 +54,17 @@ function openView(viewId) {
     control.classList.toggle("active", control.dataset.viewTarget === viewId);
   });
 
-  window.scrollTo({ top: 0, behavior: "smooth" });
+  if (settings.updateHistory && viewId !== viewFromLocation()) {
+    history.pushState({ viewId }, "", viewUrl(viewId));
+  }
+
+  document.title = viewId === "dashboard"
+    ? "Smart Resource Exchange"
+    : `${document.querySelector(`#${viewId} h1`)?.textContent || "Feature"} | Smart Resource Exchange`;
+
+  if (settings.scroll) {
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
 }
 
 function showStatus(element, message, isError = false) {
@@ -225,6 +258,23 @@ dom.typeFilter.addEventListener("change", () => {
 
 document.querySelectorAll("[data-view-target]").forEach((control) => {
   control.addEventListener("click", () => openView(control.dataset.viewTarget));
+});
+
+history.replaceState({ viewId: viewFromLocation() }, "", viewUrl(viewFromLocation()));
+openView(viewFromLocation(), { updateHistory: false, scroll: false });
+
+window.addEventListener("popstate", (event) => {
+  openView(event.state?.viewId || viewFromLocation(), {
+    updateHistory: false,
+    scroll: false
+  });
+});
+
+window.addEventListener("hashchange", () => {
+  openView(viewFromLocation(), {
+    updateHistory: false,
+    scroll: false
+  });
 });
 
 refreshData().catch(() => {
