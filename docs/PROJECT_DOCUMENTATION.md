@@ -2,7 +2,7 @@
 
 ## Overview
 
-Smart Resource Exchange is a DAA based web application for students to share, exchange, or bid for academic resources such as books, calculators, notes, and lab materials.
+Smart Resource Exchange is a DAA based web application for students to share or bid for academic resources such as books, calculators, notes, and lab materials.
 
 The core purpose is to demonstrate real algorithmic decision-making instead of first-come-first-serve allocation. The backend calculates offer priority, stores submitted offers in SQLite, allows students to publish their own listings, and allocates expired listings using a priority queue and greedy selection.
 
@@ -20,7 +20,7 @@ Seeded bot publisher accounts publish starter resources such as library books, l
 
 ### Offer and Bidding
 
-Students can submit exchange requests or bids before the listing deadline. Each offer stores the student name, credit score, urgency level, selected mode, bid value, calculated priority score, and timestamp.
+Students can submit sharing requests or credit bids before the listing deadline. Each offer stores the student name, credit score, urgency level, selected mode, bid value, calculated priority score, and timestamp.
 
 ### Time-Bound Scheduling
 
@@ -42,13 +42,19 @@ Urgency weights:
 - Medium: 18
 - Low: 8
 
-For exchange mode, bid value is ignored. For bidding mode, bid value contributes to the final score.
+For sharing mode, bid value is ignored. For bidding mode, bid value contributes to the final score.
 
 High urgency is intentionally limited to two submitted offers per student per semester so users cannot mark every request as highest priority.
 
 ### Greedy Allocation
 
 When a deadline passes, valid offers are inserted into a max priority queue. The highest-priority offer is extracted and selected as the winner.
+
+Tie breakers are deterministic:
+
+- Higher priority score wins.
+- If scores match, the earlier offer wins.
+- If score and timestamp both match, the lower user ID wins.
 
 Time complexity:
 
@@ -137,7 +143,7 @@ Example request:
   "authToken": "student-session-token",
   "description": "Available for first-year graphics practicals.",
   "urgency": "Medium",
-  "mode": "Exchange",
+  "mode": "Sharing",
   "durationMinutes": 1440
 }
 ```

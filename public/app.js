@@ -232,11 +232,11 @@ function syncOfferMode() {
   modeInput.value = resource.mode;
   modeInput.disabled = true;
   creditsInput.value = String(baseCreditScore);
-  bidInput.disabled = resource.mode === "Exchange";
+  bidInput.disabled = resource.mode === "Sharing";
   bidInput.required = resource.mode === "Bidding";
   bidInput.max = String(user.availableCredits);
   submitButton.disabled = false;
-  if (resource.mode === "Exchange") {
+  if (resource.mode === "Sharing") {
     bidInput.value = "0";
   }
 

@@ -1,6 +1,6 @@
 # Smart Resource Exchange
 
-Smart Resource Exchange is a DAA based web application for student resource sharing. It models exchange and bidding flows for books, calculators, notes, and lab materials.
+Smart Resource Exchange is a DAA based web application for student resource sharing. It models sharing and credit bidding flows for books, calculators, notes, and lab materials.
 
 ## What is included
 

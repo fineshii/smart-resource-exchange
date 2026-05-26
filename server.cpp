@@ -109,8 +109,13 @@ bool isValidUrgency(const std::string& urgency) {
   return urgency == "High" || urgency == "Medium" || urgency == "Low";
 }
 
+std::string normalizeMode(const std::string& mode) {
+  return mode == "Exchange" ? "Sharing" : mode;
+}
+
 bool isValidMode(const std::string& mode) {
-  return mode == "Exchange" || mode == "Bidding";
+  std::string normalized = normalizeMode(mode);
+  return normalized == "Sharing" || normalized == "Bidding";
 }
 
 std::string hashValue(const std::string& value) {
@@ -265,6 +270,8 @@ bool initDatabase() {
   ok = ok && executeSql("UPDATE resources SET status = 'published' WHERE status IS NULL OR status = ''");
   ok = ok && executeSql("UPDATE resources SET published_at = deadline - 86400 WHERE published_at IS NULL OR published_at = 0");
   ok = ok && executeSql("UPDATE users SET role = 'student' WHERE role IS NULL OR role = ''");
+  ok = ok && executeSql("UPDATE resources SET mode = 'Sharing' WHERE mode = 'Exchange'");
+  ok = ok && executeSql("UPDATE offers SET mode = 'Sharing' WHERE mode = 'Exchange'");
   return ok;
 }
 
@@ -651,16 +658,16 @@ void seedData() {
 
   int daaResourceId = insertResource(aaravId, "DAA Reference Book", "Book", "Aarav",
     "Algorithms textbook available for two weeks. Best for exam preparation and project viva practice.",
-    "High", "Exchange", now + (3 * 24 * 60 * 60));
+    "High", "Sharing", now + (3 * 24 * 60 * 60));
   int calculatorResourceId = insertResource(meeraId, "Scientific Calculator", "Calculator", "Meera",
     "Casio scientific calculator available for the next lab cycle. Clean condition with working battery.",
     "Medium", "Bidding", now + (5 * 24 * 60 * 60));
   insertResource(rohanId, "Physics Lab Manual Notes", "Notes", "Rohan",
     "Clean handwritten readings and experiment observations for revision before practicals.",
-    "Low", "Exchange", now + (7 * 24 * 60 * 60));
+    "Low", "Sharing", now + (7 * 24 * 60 * 60));
 
-  insertOffer(daaResourceId, nishaId, "Nisha", 50, "High", "Exchange", 0, calculatePriorityScore(50, "High", 0, "Exchange"), 0, now - 40);
-  insertOffer(daaResourceId, kabirId, "Kabir", 50, "Medium", "Exchange", 0, calculatePriorityScore(50, "Medium", 0, "Exchange"), 0, now - 20);
+  insertOffer(daaResourceId, nishaId, "Nisha", 50, "High", "Sharing", 0, calculatePriorityScore(50, "High", 0, "Sharing"), 0, now - 40);
+  insertOffer(daaResourceId, kabirId, "Kabir", 50, "Medium", "Sharing", 0, calculatePriorityScore(50, "Medium", 0, "Sharing"), 0, now - 20);
   insertOffer(calculatorResourceId, ishaId, "Isha", 50, "Medium", "Bidding", 45, calculatePriorityScore(50, "Medium", 45, "Bidding"), 45, now - 15);
 
   executeSql(
@@ -679,19 +686,19 @@ void ensureBotPublishingData() {
 
   ensurePublishedResource(libraryBotId, "Campus Library Bot", "Database Systems Handbook", "Book",
     "Reference copy for SQL, indexing, transactions, and ER diagrams. Published by the library desk for short academic use.",
-    "Medium", "Exchange", 9);
+    "Medium", "Sharing", 9);
   ensurePublishedResource(libraryBotId, "Campus Library Bot", "Operating Systems Previous Papers", "Notes",
     "Curated PYQ bundle with unit-wise topics and exam pattern notes for the current semester.",
-    "High", "Exchange", 6);
+    "High", "Sharing", 6);
   ensurePublishedResource(labBotId, "Lab Store Bot", "Arduino Starter Kit", "Lab Material",
     "Uno board, jumper wires, sensors, and breadboard available for IoT mini-project submissions.",
     "High", "Bidding", 4);
   ensurePublishedResource(labBotId, "Lab Store Bot", "Engineering Graphics Mini Drafter", "Other",
     "Mini drafter and sheet clips for students who need it during drawing lab week.",
-    "Medium", "Exchange", 12);
+    "Medium", "Sharing", 12);
   ensurePublishedResource(notesBotId, "Notes Desk Bot", "Machine Learning Lecture Pack", "Notes",
     "Clean PDF-style handwritten notes covering regression, classification, clustering, and evaluation metrics.",
-    "Low", "Exchange", 14);
+    "Low", "Sharing", 14);
   ensurePublishedResource(placementBotId, "Placement Cell Bot", "Aptitude Practice Workbook", "Book",
     "Practice workbook for quantitative aptitude, logical reasoning, and interview warmup exercises.",
     "Medium", "Bidding", 10);
@@ -867,10 +874,13 @@ bool allocateExpiredResources() {
     }
 
     auto compare = [](const Offer& left, const Offer& right) {
-      if (left.priorityScore == right.priorityScore) {
+      if (left.priorityScore != right.priorityScore) {
+        return left.priorityScore < right.priorityScore;
+      }
+      if (left.timestamp != right.timestamp) {
         return left.timestamp > right.timestamp;
       }
-      return left.priorityScore < right.priorityScore;
+      return left.userId > right.userId;
     };
 
     std::priority_queue<Offer, std::vector<Offer>, decltype(compare)> heap(compare);
@@ -1008,7 +1018,7 @@ std::string submitOffer(const std::string& body, int& statusCode) {
   int resourceId = parseIntField(body, "resourceId");
   std::string authToken = parseStringField(body, "authToken");
   std::string urgency = parseStringField(body, "urgency");
-  std::string mode = parseStringField(body, "mode");
+  std::string mode = normalizeMode(parseStringField(body, "mode"));
   int bidValue = parseIntField(body, "bidValue");
 
   User currentUser;
@@ -1029,7 +1039,7 @@ std::string submitOffer(const std::string& body, int& statusCode) {
 
   if (!isValidMode(mode)) {
     statusCode = 400;
-    return "{\"error\":\"Offer mode must be Exchange or Bidding.\"}";
+    return "{\"error\":\"Offer mode must be Sharing or Bidding.\"}";
   }
 
   if (bidValue < 0 || bidValue > 10000) {
@@ -1061,12 +1071,12 @@ std::string submitOffer(const std::string& body, int& statusCode) {
 
   if (mode != it->mode) {
     statusCode = 400;
-    return "{\"error\":\"Offer mode must match the resource exchange mode.\"}";
+    return "{\"error\":\"Offer mode must match the listing mode.\"}";
   }
 
-  if (mode == "Exchange" && bidValue != 0) {
+  if (mode == "Sharing" && bidValue != 0) {
     statusCode = 400;
-    return "{\"error\":\"Exchange offers cannot include a bid value.\"}";
+    return "{\"error\":\"Sharing offers cannot include a bid value.\"}";
   }
 
   if (mode == "Bidding" && bidValue == 0) {
@@ -1111,7 +1121,7 @@ std::string createResource(const std::string& body, int& statusCode) {
   std::string authToken = parseStringField(body, "authToken");
   std::string description = parseStringField(body, "description");
   std::string urgency = parseStringField(body, "urgency");
-  std::string mode = parseStringField(body, "mode");
+  std::string mode = normalizeMode(parseStringField(body, "mode"));
   int durationMinutes = parseIntField(body, "durationMinutes", 180);
 
   User currentUser;
@@ -1129,7 +1139,7 @@ std::string createResource(const std::string& body, int& statusCode) {
     urgency = "Medium";
   }
   if (!isValidMode(mode)) {
-    mode = "Exchange";
+    mode = "Sharing";
   }
   if (durationMinutes < 5) {
     durationMinutes = 5;
