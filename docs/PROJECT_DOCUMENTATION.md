@@ -6,6 +6,8 @@ Smart Resource Exchange is a DAA based web application for students to share, ex
 
 The core purpose is to demonstrate real algorithmic decision-making instead of first-come-first-serve allocation. The backend calculates offer priority, stores submitted offers in SQLite, allows students to publish their own listings, and allocates expired listings using a priority queue and greedy selection.
 
+The current version also uses student accounts. Each user has a semester credit wallet, bidding can lock credits until allocation, and selected sellers receive the winning bid credits after their listing is allocated.
+
 ## Modules
 
 ### Resource Management
@@ -13,6 +15,8 @@ The core purpose is to demonstrate real algorithmic decision-making instead of f
 Students can view academic resources with owner, type, mode, urgency, deadline, offer count, and allocation status.
 
 Students can also publish their own resources by entering the title, owner name, type, mode, urgency, deadline window, and listing details.
+
+Seeded bot publisher accounts publish starter resources such as library books, lab materials, notes, and placement workbooks. These records use the same `resources` table as student-published listings, with publish metadata attached.
 
 ### Offer and Bidding
 
@@ -60,13 +64,35 @@ Tables:
 
 - `resources`
 - `offers`
+- `users`
+- `semesters`
+- `credit_transactions`
 - `internships`
+
+Important fields:
+
+- `users.role` and `users.is_bot` mark student accounts versus seeded bot publisher accounts.
+- `resources.status` and `resources.published_at` track publication state and publish time.
+- `offers.locked_credits` and `offers.status` track active bidding commitments.
+- `credit_transactions.reason` records semester grants, locked bid releases, and seller credit transfers.
 
 ## API
 
 ### GET `/api/resources`
 
-Returns all resources and internship/scholarship records.
+Returns all resources, public user wallet summaries, active semester data, and internship/scholarship records.
+
+### POST `/api/register`
+
+Creates a student account and grants the active semester credits.
+
+### POST `/api/login`
+
+Logs in an existing account and returns an auth token for protected actions.
+
+### POST `/api/session`
+
+Refreshes the current user session from an auth token.
 
 ### POST `/api/offers`
 
@@ -77,8 +103,7 @@ Example request:
 ```json
 {
   "resourceId": 1,
-  "studentName": "Priya",
-  "credits": 27,
+  "authToken": "student-session-token",
   "urgency": "High",
   "mode": "Bidding",
   "bidValue": 60
@@ -90,7 +115,8 @@ Example response:
 ```json
 {
   "ok": true,
-  "score": 144
+  "score": 190,
+  "availableCredits": 40
 }
 ```
 
@@ -104,7 +130,7 @@ Example request:
 {
   "title": "Engineering Drawing Kit",
   "type": "Lab Material",
-  "owner": "Priya",
+  "authToken": "student-session-token",
   "description": "Available for first-year graphics practicals.",
   "urgency": "Medium",
   "mode": "Exchange",

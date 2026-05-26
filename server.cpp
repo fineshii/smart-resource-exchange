@@ -40,6 +40,8 @@ struct Resource {
   std::string description;
   std::string urgency;
   std::string mode;
+  std::string status;
+  std::time_t publishedAt;
   std::time_t deadline;
   std::vector<Offer> offers;
   std::string allocatedTo;
@@ -56,6 +58,8 @@ struct User {
   int id;
   std::string name;
   std::string email;
+  std::string role;
+  bool isBot;
   int creditBalance;
   int lockedCredits;
   int availableCredits;
@@ -184,6 +188,8 @@ bool initDatabase() {
     "  description TEXT NOT NULL,"
     "  urgency TEXT NOT NULL,"
     "  mode TEXT NOT NULL,"
+    "  status TEXT DEFAULT 'published',"
+    "  published_at INTEGER DEFAULT 0,"
     "  deadline INTEGER NOT NULL,"
     "  allocated_to TEXT DEFAULT '',"
     "  best_score INTEGER DEFAULT 0"
@@ -209,6 +215,8 @@ bool initDatabase() {
     "  email TEXT DEFAULT '',"
     "  password_hash TEXT DEFAULT '',"
     "  auth_token TEXT DEFAULT '',"
+    "  role TEXT DEFAULT 'student',"
+    "  is_bot INTEGER DEFAULT 0,"
     "  credit_balance INTEGER NOT NULL DEFAULT 0,"
     "  created_at INTEGER NOT NULL"
     ");"
@@ -240,12 +248,19 @@ bool initDatabase() {
   );
 
   ok = ok && addColumnIfMissing("resources", "owner_user_id", "INTEGER DEFAULT 0");
+  ok = ok && addColumnIfMissing("resources", "status", "TEXT DEFAULT 'published'");
+  ok = ok && addColumnIfMissing("resources", "published_at", "INTEGER DEFAULT 0");
   ok = ok && addColumnIfMissing("offers", "user_id", "INTEGER DEFAULT 0");
   ok = ok && addColumnIfMissing("offers", "locked_credits", "INTEGER DEFAULT 0");
   ok = ok && addColumnIfMissing("offers", "status", "TEXT DEFAULT 'pending'");
   ok = ok && addColumnIfMissing("users", "email", "TEXT DEFAULT ''");
   ok = ok && addColumnIfMissing("users", "password_hash", "TEXT DEFAULT ''");
   ok = ok && addColumnIfMissing("users", "auth_token", "TEXT DEFAULT ''");
+  ok = ok && addColumnIfMissing("users", "role", "TEXT DEFAULT 'student'");
+  ok = ok && addColumnIfMissing("users", "is_bot", "INTEGER DEFAULT 0");
+  ok = ok && executeSql("UPDATE resources SET status = 'published' WHERE status IS NULL OR status = ''");
+  ok = ok && executeSql("UPDATE resources SET published_at = deadline - 86400 WHERE published_at IS NULL OR published_at = 0");
+  ok = ok && executeSql("UPDATE users SET role = 'student' WHERE role IS NULL OR role = ''");
   return ok;
 }
 
@@ -374,8 +389,10 @@ User userByStatement(sqlite3_stmt* statement) {
   user.id = sqlite3_column_int(statement, 0);
   user.name = sqliteText(statement, 1);
   user.email = sqliteText(statement, 2);
-  user.creditBalance = sqlite3_column_int(statement, 3);
-  user.authToken = sqliteText(statement, 4);
+  user.role = sqliteText(statement, 3);
+  user.isBot = sqlite3_column_int(statement, 4) == 1;
+  user.creditBalance = sqlite3_column_int(statement, 5);
+  user.authToken = sqliteText(statement, 6);
   user.lockedCredits = lockedCreditsForUser(user.id);
   user.availableCredits = user.creditBalance - user.lockedCredits;
   return user;
@@ -386,7 +403,7 @@ bool loadUserByToken(const std::string& authToken, User& user) {
   sqlite3_stmt* statement = nullptr;
   bool found = false;
   sqlite3_prepare_v2(database,
-    "SELECT id, name, email, credit_balance, auth_token FROM users WHERE auth_token = ?",
+    "SELECT id, name, email, role, is_bot, credit_balance, auth_token FROM users WHERE auth_token = ?",
     -1, &statement, nullptr);
   bindText(statement, 1, authToken);
   if (sqlite3_step(statement) == SQLITE_ROW) {
@@ -453,12 +470,43 @@ int ensureUser(const std::string& name) {
   return userId;
 }
 
+int ensureBotUser(const std::string& name, const std::string& email) {
+  int userId = findUserId(name);
+  sqlite3_stmt* statement = nullptr;
+  if (userId == 0) {
+    sqlite3_prepare_v2(database,
+      "INSERT INTO users(name, email, password_hash, auth_token, role, is_bot, credit_balance, created_at) "
+      "VALUES (?, ?, ?, '', 'bot', 1, 0, ?)",
+      -1, &statement, nullptr);
+    bindText(statement, 1, name);
+    bindText(statement, 2, email);
+    bindText(statement, 3, passwordHash("demo1234"));
+    sqlite3_bind_int64(statement, 4, static_cast<sqlite3_int64>(std::time(nullptr)));
+    sqlite3_step(statement);
+    sqlite3_finalize(statement);
+    userId = static_cast<int>(sqlite3_last_insert_rowid(database));
+  } else {
+    sqlite3_prepare_v2(database,
+      "UPDATE users SET email = ?, password_hash = ?, role = 'bot', is_bot = 1 WHERE id = ?",
+      -1, &statement, nullptr);
+    bindText(statement, 1, email);
+    bindText(statement, 2, passwordHash("demo1234"));
+    sqlite3_bind_int(statement, 3, userId);
+    sqlite3_step(statement);
+    sqlite3_finalize(statement);
+  }
+  ensureSemesterGrant(userId);
+  return userId;
+}
+
 std::string userJson(const User& user) {
   std::ostringstream json;
   json << "{"
        << "\"id\":" << user.id << ","
        << "\"name\":\"" << escapeJson(user.name) << "\","
        << "\"email\":\"" << escapeJson(user.email) << "\","
+       << "\"role\":\"" << escapeJson(user.role) << "\","
+       << "\"isBot\":" << (user.isBot ? "true" : "false") << ","
        << "\"creditBalance\":" << user.creditBalance << ","
        << "\"lockedCredits\":" << user.lockedCredits << ","
        << "\"availableCredits\":" << user.availableCredits << ","
@@ -497,13 +545,13 @@ int availableCreditsForUser(int userId) {
   return creditBalanceForUser(userId) - lockedCreditsForUser(userId);
 }
 
-void insertResource(int ownerUserId, const std::string& title, const std::string& type, const std::string& owner,
-                    const std::string& description, const std::string& urgency,
-                    const std::string& mode, std::time_t deadline) {
+int insertResource(int ownerUserId, const std::string& title, const std::string& type, const std::string& owner,
+                   const std::string& description, const std::string& urgency,
+                   const std::string& mode, std::time_t deadline) {
   sqlite3_stmt* statement = nullptr;
   sqlite3_prepare_v2(database,
-    "INSERT INTO resources(owner_user_id, title, type, owner, description, urgency, mode, deadline, allocated_to, best_score) "
-    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, '', 0)",
+    "INSERT INTO resources(owner_user_id, title, type, owner, description, urgency, mode, status, published_at, deadline, allocated_to, best_score) "
+    "VALUES (?, ?, ?, ?, ?, ?, ?, 'published', ?, ?, '', 0)",
     -1, &statement, nullptr);
   sqlite3_bind_int(statement, 1, ownerUserId);
   bindText(statement, 2, title);
@@ -512,9 +560,11 @@ void insertResource(int ownerUserId, const std::string& title, const std::string
   bindText(statement, 5, description);
   bindText(statement, 6, urgency);
   bindText(statement, 7, mode);
-  sqlite3_bind_int64(statement, 8, static_cast<sqlite3_int64>(deadline));
+  sqlite3_bind_int64(statement, 8, static_cast<sqlite3_int64>(std::time(nullptr)));
+  sqlite3_bind_int64(statement, 9, static_cast<sqlite3_int64>(deadline));
   sqlite3_step(statement);
   sqlite3_finalize(statement);
+  return static_cast<int>(sqlite3_last_insert_rowid(database));
 }
 
 void insertOffer(int resourceId, int userId, const std::string& studentName, int credits, const std::string& urgency,
@@ -538,6 +588,28 @@ void insertOffer(int resourceId, int userId, const std::string& studentName, int
   sqlite3_finalize(statement);
 }
 
+bool resourceExistsForOwner(int ownerUserId, const std::string& title) {
+  sqlite3_stmt* statement = nullptr;
+  bool exists = false;
+  sqlite3_prepare_v2(database, "SELECT id FROM resources WHERE owner_user_id = ? AND title = ?", -1, &statement, nullptr);
+  sqlite3_bind_int(statement, 1, ownerUserId);
+  bindText(statement, 2, title);
+  exists = sqlite3_step(statement) == SQLITE_ROW;
+  sqlite3_finalize(statement);
+  return exists;
+}
+
+void ensurePublishedResource(int ownerUserId, const std::string& owner, const std::string& title,
+                             const std::string& type, const std::string& description,
+                             const std::string& urgency, const std::string& mode,
+                             int deadlineDaysFromNow) {
+  if (resourceExistsForOwner(ownerUserId, title)) {
+    return;
+  }
+  insertResource(ownerUserId, title, type, owner, description, urgency, mode,
+    std::time(nullptr) + (deadlineDaysFromNow * 24 * 60 * 60));
+}
+
 void seedData() {
   std::time_t now = std::time(nullptr);
   int aaravId = ensureUser("Aarav");
@@ -547,19 +619,19 @@ void seedData() {
   int kabirId = ensureUser("Kabir");
   int ishaId = ensureUser("Isha");
 
-  insertResource(aaravId, "DAA Reference Book", "Book", "Aarav",
+  int daaResourceId = insertResource(aaravId, "DAA Reference Book", "Book", "Aarav",
     "Algorithms textbook available for two weeks. Best for exam preparation and project viva practice.",
     "High", "Exchange", now + (3 * 24 * 60 * 60));
-  insertResource(meeraId, "Scientific Calculator", "Calculator", "Meera",
+  int calculatorResourceId = insertResource(meeraId, "Scientific Calculator", "Calculator", "Meera",
     "Casio scientific calculator available for the next lab cycle. Clean condition with working battery.",
     "Medium", "Bidding", now + (5 * 24 * 60 * 60));
   insertResource(rohanId, "Physics Lab Manual Notes", "Notes", "Rohan",
     "Clean handwritten readings and experiment observations for revision before practicals.",
     "Low", "Exchange", now + (7 * 24 * 60 * 60));
 
-  insertOffer(1, nishaId, "Nisha", 50, "High", "Exchange", 0, calculatePriorityScore(50, "High", 0, "Exchange"), 0, now - 40);
-  insertOffer(1, kabirId, "Kabir", 50, "Medium", "Exchange", 0, calculatePriorityScore(50, "Medium", 0, "Exchange"), 0, now - 20);
-  insertOffer(2, ishaId, "Isha", 50, "Medium", "Bidding", 45, calculatePriorityScore(50, "Medium", 45, "Bidding"), 45, now - 15);
+  insertOffer(daaResourceId, nishaId, "Nisha", 50, "High", "Exchange", 0, calculatePriorityScore(50, "High", 0, "Exchange"), 0, now - 40);
+  insertOffer(daaResourceId, kabirId, "Kabir", 50, "Medium", "Exchange", 0, calculatePriorityScore(50, "Medium", 0, "Exchange"), 0, now - 20);
+  insertOffer(calculatorResourceId, ishaId, "Isha", 50, "Medium", "Bidding", 45, calculatePriorityScore(50, "Medium", 45, "Bidding"), 45, now - 15);
 
   executeSql(
     "INSERT INTO internships(company, title, deadline) VALUES "
@@ -569,10 +641,37 @@ void seedData() {
   );
 }
 
+void ensureBotPublishingData() {
+  int libraryBotId = ensureBotUser("Campus Library Bot", "library.bot@smartx.local");
+  int labBotId = ensureBotUser("Lab Store Bot", "lab.bot@smartx.local");
+  int notesBotId = ensureBotUser("Notes Desk Bot", "notes.bot@smartx.local");
+  int placementBotId = ensureBotUser("Placement Cell Bot", "placement.bot@smartx.local");
+
+  ensurePublishedResource(libraryBotId, "Campus Library Bot", "Database Systems Handbook", "Book",
+    "Reference copy for SQL, indexing, transactions, and ER diagrams. Published by the library desk for short academic use.",
+    "Medium", "Exchange", 9);
+  ensurePublishedResource(libraryBotId, "Campus Library Bot", "Operating Systems Previous Papers", "Notes",
+    "Curated PYQ bundle with unit-wise topics and exam pattern notes for the current semester.",
+    "High", "Exchange", 6);
+  ensurePublishedResource(labBotId, "Lab Store Bot", "Arduino Starter Kit", "Lab Material",
+    "Uno board, jumper wires, sensors, and breadboard available for IoT mini-project submissions.",
+    "High", "Bidding", 4);
+  ensurePublishedResource(labBotId, "Lab Store Bot", "Engineering Graphics Mini Drafter", "Other",
+    "Mini drafter and sheet clips for students who need it during drawing lab week.",
+    "Medium", "Exchange", 12);
+  ensurePublishedResource(notesBotId, "Notes Desk Bot", "Machine Learning Lecture Pack", "Notes",
+    "Clean PDF-style handwritten notes covering regression, classification, clustering, and evaluation metrics.",
+    "Low", "Exchange", 14);
+  ensurePublishedResource(placementBotId, "Placement Cell Bot", "Aptitude Practice Workbook", "Book",
+    "Practice workbook for quantitative aptitude, logical reasoning, and interview warmup exercises.",
+    "Medium", "Bidding", 10);
+}
+
 void ensureSeedData() {
   if (tableCount("resources") == 0) {
     seedData();
   }
+  ensureBotPublishingData();
 }
 
 void migrateLegacyUsers() {
@@ -635,7 +734,7 @@ void loadData() {
 
   sqlite3_stmt* statement = nullptr;
   sqlite3_prepare_v2(database,
-    "SELECT id, owner_user_id, title, type, owner, description, urgency, mode, deadline, allocated_to, best_score "
+    "SELECT id, owner_user_id, title, type, owner, description, urgency, mode, status, published_at, deadline, allocated_to, best_score "
     "FROM resources ORDER BY allocated_to = '', deadline ASC, id ASC",
     -1, &statement, nullptr);
 
@@ -649,9 +748,11 @@ void loadData() {
     resource.description = sqliteText(statement, 5);
     resource.urgency = sqliteText(statement, 6);
     resource.mode = sqliteText(statement, 7);
-    resource.deadline = static_cast<std::time_t>(sqlite3_column_int64(statement, 8));
-    resource.allocatedTo = sqliteText(statement, 9);
-    resource.bestScore = sqlite3_column_int(statement, 10);
+    resource.status = sqliteText(statement, 8);
+    resource.publishedAt = static_cast<std::time_t>(sqlite3_column_int64(statement, 9));
+    resource.deadline = static_cast<std::time_t>(sqlite3_column_int64(statement, 10));
+    resource.allocatedTo = sqliteText(statement, 11);
+    resource.bestScore = sqlite3_column_int(statement, 12);
     resources.push_back(resource);
   }
   sqlite3_finalize(statement);
@@ -694,7 +795,7 @@ void loadData() {
   sqlite3_finalize(statement);
 
   sqlite3_prepare_v2(database,
-    "SELECT id, name, email, credit_balance, auth_token FROM users ORDER BY name ASC",
+    "SELECT id, name, email, role, is_bot, credit_balance, auth_token FROM users ORDER BY name ASC",
     -1, &statement, nullptr);
   while (sqlite3_step(statement) == SQLITE_ROW) {
     users.push_back(userByStatement(statement));
@@ -802,6 +903,8 @@ std::string resourcesJson() {
          << "\"description\":\"" << escapeJson(r.description) << "\","
          << "\"urgency\":\"" << escapeJson(r.urgency) << "\","
          << "\"mode\":\"" << escapeJson(r.mode) << "\","
+         << "\"status\":\"" << escapeJson(r.status) << "\","
+         << "\"publishedAt\":" << static_cast<long long>(r.publishedAt) << ","
          << "\"deadline\":" << static_cast<long long>(r.deadline) << ","
          << "\"offerCount\":" << r.offers.size() << ","
          << "\"allocatedTo\":\"" << escapeJson(r.allocatedTo) << "\","
@@ -816,6 +919,8 @@ std::string resourcesJson() {
     json << "{"
          << "\"id\":" << user.id << ","
          << "\"name\":\"" << escapeJson(user.name) << "\","
+         << "\"role\":\"" << escapeJson(user.role) << "\","
+         << "\"isBot\":" << (user.isBot ? "true" : "false") << ","
          << "\"creditBalance\":" << user.creditBalance << ","
          << "\"lockedCredits\":" << user.lockedCredits << ","
          << "\"availableCredits\":" << user.availableCredits
@@ -992,11 +1097,11 @@ std::string createResource(const std::string& body, int& statusCode) {
   }
 
   std::time_t deadline = std::time(nullptr) + (durationMinutes * 60);
-  insertResource(currentUser.id, title, type, currentUser.name, description, urgency, mode, deadline);
+  int resourceId = insertResource(currentUser.id, title, type, currentUser.name, description, urgency, mode, deadline);
 
   statusCode = 201;
   std::ostringstream response;
-  response << "{\"ok\":true,\"id\":" << sqlite3_last_insert_rowid(database) << "}";
+  response << "{\"ok\":true,\"id\":" << resourceId << "}";
   return response.str();
 }
 

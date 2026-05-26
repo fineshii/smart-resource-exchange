@@ -7,9 +7,12 @@ Smart Resource Exchange is a DAA based web application for student resource shar
 - C++ backend in `server.cpp`
 - SQLite database in `data/smart_resource_exchange.sqlite`
 - Static frontend in `public/`
+- Login and registration with per-user credit wallets
 - Resource listing dashboard
 - Student resource publishing form
 - Offer and bidding form
+- Semester credit grants and locked bidding credits
+- Bot publisher accounts with starter marketplace listings
 - Deadline-based allocation
 - Priority score formula and greedy winner selection
 - Internship and scholarship module
@@ -44,16 +47,22 @@ The backend stores app data in one SQLite database:
 
 - `data/smart_resource_exchange.sqlite`
 
-It creates three SQL tables automatically on first run:
+It creates and migrates these SQL tables automatically on startup:
 
 - `resources`
 - `offers`
+- `users`
+- `semesters`
+- `credit_transactions`
 - `internships`
 
-New resources and offers are saved immediately and remain available after restarting the server.
+New accounts, published resources, offers, semester grants, and credit movements are saved immediately and remain available after restarting the server. Demo bot accounts are also seeded with published resources so the marketplace is not empty.
 
 ## API
 
 - `GET /api/resources`
+- `POST /api/register`
+- `POST /api/login`
+- `POST /api/session`
 - `POST /api/resources`
 - `POST /api/offers`
