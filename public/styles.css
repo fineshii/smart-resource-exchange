@@ -120,6 +120,11 @@ nav {
   color: var(--green);
 }
 
+.nav-link:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
+}
+
 main {
   padding-bottom: 44px;
 }

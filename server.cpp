@@ -1153,6 +1153,7 @@ std::string httpResponse(int statusCode, const std::string& body, const std::str
   std::ostringstream response;
   response << "HTTP/1.1 " << statusCode << " " << reason << "\r\n"
            << "Content-Type: " << contentType << "\r\n"
+           << "Cache-Control: no-store\r\n"
            << "Content-Length: " << body.size() << "\r\n"
            << "Connection: close\r\n\r\n"
            << body;

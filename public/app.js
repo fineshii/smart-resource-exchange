@@ -4,9 +4,12 @@ const state = {
   users: [],
   semester: null,
   currentUser: JSON.parse(localStorage.getItem("smartExchangeUser") || "null"),
+  pendingView: null,
   search: "",
   type: "All"
 };
+
+const publicViews = new Set(["auth"]);
 
 const dom = {
   resourceList: document.querySelector("#resource-list"),
@@ -38,9 +41,26 @@ function isKnownView(viewId) {
   return Boolean(document.getElementById(viewId));
 }
 
-function viewFromLocation() {
+function rawViewFromLocation() {
   const viewId = window.location.hash.replace("#", "");
   return isKnownView(viewId) ? viewId : "dashboard";
+}
+
+function isProtectedView(viewId) {
+  return !publicViews.has(viewId);
+}
+
+function routeFor(viewId) {
+  const requestedView = isKnownView(viewId) ? viewId : "dashboard";
+  if (!state.currentUser && isProtectedView(requestedView)) {
+    state.pendingView = requestedView;
+    return "auth";
+  }
+  return requestedView;
+}
+
+function viewFromLocation() {
+  return routeFor(rawViewFromLocation());
 }
 
 function viewUrl(viewId) {
@@ -55,24 +75,35 @@ function openView(viewId, options = {}) {
   const settings = {
     updateHistory: true,
     scroll: true,
+    replaceHistory: false,
     ...options
   };
+  const targetView = routeFor(viewId);
+
+  if (targetView === "auth" && viewId !== "auth" && !state.currentUser) {
+    showStatus(dom.loginStatus, "Log in to continue.", true);
+  }
 
   document.querySelectorAll("[data-view]").forEach((view) => {
-    view.classList.toggle("active", view.id === viewId);
+    view.classList.toggle("active", view.id === targetView);
   });
 
   document.querySelectorAll("[data-view-target]").forEach((control) => {
-    control.classList.toggle("active", control.dataset.viewTarget === viewId);
+    control.classList.toggle("active", control.dataset.viewTarget === targetView);
   });
 
-  if (settings.updateHistory && viewId !== viewFromLocation()) {
-    history.pushState({ viewId }, "", viewUrl(viewId));
+  if (settings.updateHistory && targetView !== rawViewFromLocation()) {
+    const nextState = { viewId: targetView };
+    if (settings.replaceHistory) {
+      history.replaceState(nextState, "", viewUrl(targetView));
+    } else {
+      history.pushState(nextState, "", viewUrl(targetView));
+    }
   }
 
-  document.title = viewId === "dashboard"
+  document.title = targetView === "dashboard"
     ? "Smart Resource Exchange"
-    : `${document.querySelector(`#${viewId} h1`)?.textContent || "Feature"} | Smart Resource Exchange`;
+    : `${document.querySelector(`#${targetView} h1`)?.textContent || "Feature"} | Smart Resource Exchange`;
 
   if (settings.scroll) {
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -274,6 +305,13 @@ function updateAccountUI() {
     localStorage.setItem("smartExchangeUser", JSON.stringify(state.currentUser));
   }
 
+  document.body.classList.toggle("is-authenticated", Boolean(state.currentUser));
+  document.querySelectorAll("[data-view-target]").forEach((control) => {
+    const target = control.dataset.viewTarget;
+    if (control.classList.contains("brand-button")) return;
+    control.disabled = !state.currentUser && isProtectedView(target);
+  });
+
   if (!state.currentUser) {
     dom.accountTitle.textContent = "No account logged in";
     dom.accountSummary.textContent = "Log in to list resources, request items, and use your own semester credits.";
@@ -407,6 +445,8 @@ dom.registerForm.addEventListener("submit", async (event) => {
   setCurrentUser(data.user);
   showStatus(dom.registerStatus, "Account created and logged in.");
   await refreshData();
+  openView(state.pendingView || "dashboard");
+  state.pendingView = null;
 });
 
 dom.loginForm.addEventListener("submit", async (event) => {
@@ -428,11 +468,14 @@ dom.loginForm.addEventListener("submit", async (event) => {
   setCurrentUser(data.user);
   showStatus(dom.loginStatus, "Logged in successfully.");
   await refreshData();
+  openView(state.pendingView || "dashboard");
+  state.pendingView = null;
 });
 
 dom.logoutButton.addEventListener("click", () => {
   setCurrentUser(null);
   showStatus(dom.loginStatus, "Logged out.");
+  openView("auth", { replaceHistory: true });
 });
 
 dom.refresh.addEventListener("click", async () => {
@@ -456,9 +499,6 @@ document.querySelectorAll("[data-view-target]").forEach((control) => {
   control.addEventListener("click", () => openView(control.dataset.viewTarget));
 });
 
-history.replaceState({ viewId: viewFromLocation() }, "", viewUrl(viewFromLocation()));
-openView(viewFromLocation(), { updateHistory: false, scroll: false });
-
 window.addEventListener("popstate", (event) => {
   openView(event.state?.viewId || viewFromLocation(), {
     updateHistory: false,
@@ -473,8 +513,19 @@ window.addEventListener("hashchange", () => {
   });
 });
 
-restoreSession()
-  .then(refreshData)
+async function initializeApp() {
+  updateAccountUI();
+  await restoreSession();
+  if (state.currentUser) {
+    await refreshData();
+  }
+  const initialView = viewFromLocation();
+  history.replaceState({ viewId: initialView }, "", viewUrl(initialView));
+  openView(initialView, { updateHistory: false, scroll: false });
+}
+
+initializeApp()
   .catch(() => {
-    showStatus(dom.offerStatus, "Could not connect to the C++ backend.", true);
+    showStatus(dom.loginStatus, "Could not connect to the C++ backend.", true);
+    openView("auth", { replaceHistory: true });
   });

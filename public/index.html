@@ -14,17 +14,17 @@
       <strong>Smart Resource Exchange</strong>
     </button>
     <nav aria-label="Feature navigation">
-      <button class="nav-link active" type="button" data-view-target="dashboard">Dashboard</button>
+      <button class="nav-link" type="button" data-view-target="dashboard">Dashboard</button>
       <button class="nav-link" type="button" data-view-target="market">Browse</button>
       <button class="nav-link" type="button" data-view-target="request">Request</button>
       <button class="nav-link" type="button" data-view-target="list-resource">List</button>
       <button class="nav-link" type="button" data-view-target="opportunities">Opportunities</button>
-      <button class="nav-link" type="button" data-view-target="auth">Account</button>
+      <button class="nav-link active" type="button" data-view-target="auth">Account</button>
     </nav>
   </header>
 
   <main>
-    <section class="view active" id="dashboard" data-view>
+    <section class="view" id="dashboard" data-view>
       <div class="dashboard-hero">
         <div class="hero-grid" aria-hidden="true"></div>
         <div class="hero-content">
@@ -170,7 +170,7 @@
       </section>
     </section>
 
-    <section class="view" id="auth" data-view>
+    <section class="view active" id="auth" data-view>
       <div class="view-head">
         <div>
           <p class="eyebrow">Student account</p>
@@ -413,6 +413,6 @@
     </article>
   </template>
 
-  <script src="app.js"></script>
+  <script src="app.js?v=auth-gate"></script>
 </body>
 </html>
