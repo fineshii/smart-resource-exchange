@@ -3,6 +3,7 @@ const state = {
   internships: [],
   users: [],
   semester: null,
+  currentUser: JSON.parse(localStorage.getItem("smartExchangeUser") || "null"),
   search: "",
   type: "All"
 };
@@ -13,9 +14,17 @@ const dom = {
   resourceSelect: document.querySelector("#resource-id"),
   offerForm: document.querySelector("#offer-form"),
   listingForm: document.querySelector("#listing-form"),
+  registerForm: document.querySelector("#register-form"),
+  loginForm: document.querySelector("#login-form"),
+  logoutButton: document.querySelector("#logout-button"),
   offerStatus: document.querySelector("#offer-status"),
   walletStatus: document.querySelector("#wallet-status"),
   listingStatus: document.querySelector("#listing-status"),
+  registerStatus: document.querySelector("#register-status"),
+  loginStatus: document.querySelector("#login-status"),
+  accountTitle: document.querySelector("#account-title"),
+  accountSummary: document.querySelector("#account-summary"),
+  offerAccount: document.querySelector("#offer-account"),
   refresh: document.querySelector("#refresh-button"),
   activeCount: document.querySelector("#active-count"),
   offerCount: document.querySelector("#offer-count"),
@@ -111,28 +120,24 @@ function selectedResource() {
 }
 
 function selectedUser() {
-  const userName = document.querySelector("#student-name").value;
-  return state.users.find((user) => user.name === userName);
-}
-
-function chooseEligibleUser(resource) {
-  const userSelect = document.querySelector("#student-name");
-  const currentUser = selectedUser();
-  if (currentUser && currentUser.id !== resource.ownerUserId) {
-    return currentUser;
-  }
-
-  const nextUser = state.users.find((user) => user.id !== resource.ownerUserId);
-  if (nextUser) {
-    userSelect.value = nextUser.name;
-  }
-  return nextUser || currentUser;
+  if (!state.currentUser) return null;
+  return state.users.find((user) => user.id === state.currentUser.id) || state.currentUser;
 }
 
 function syncOfferMode() {
   const resource = selectedResource();
-  const user = resource ? chooseEligibleUser(resource) : selectedUser();
+  const user = selectedUser();
   const submitButton = dom.offerForm.querySelector("button[type='submit']");
+  if (!state.currentUser) {
+    document.querySelector("#credits").value = "0";
+    document.querySelector("#bid-value").value = "0";
+    document.querySelector("#bid-value").disabled = true;
+    submitButton.disabled = true;
+    dom.offerAccount.textContent = "Log in to make an offer with your own credits.";
+    showStatus(dom.walletStatus, "Please log in before requesting a resource.", true);
+    return;
+  }
+
   if (!resource || !user || !isOpen(resource)) {
     document.querySelector("#credits").value = "0";
     document.querySelector("#bid-value").value = "0";
@@ -142,11 +147,22 @@ function syncOfferMode() {
     return;
   }
 
+  if (resource.ownerUserId === user.id) {
+    document.querySelector("#credits").value = "0";
+    document.querySelector("#bid-value").value = "0";
+    document.querySelector("#bid-value").disabled = true;
+    submitButton.disabled = true;
+    dom.offerAccount.textContent = `${user.name} is the owner of this resource.`;
+    showStatus(dom.walletStatus, "You cannot make an offer on your own resource.", true);
+    return;
+  }
+
   const modeInput = document.querySelector("#mode");
   const bidInput = document.querySelector("#bid-value");
   const creditsInput = document.querySelector("#credits");
   const walletScore = Math.min(user.availableCredits, 50);
 
+  dom.offerAccount.textContent = `Logged in as ${user.name}`;
   modeInput.value = resource.mode;
   modeInput.disabled = true;
   creditsInput.value = String(walletScore);
@@ -240,23 +256,41 @@ function renderInternships() {
   });
 }
 
-function renderUsers() {
-  const userSelect = document.querySelector("#student-name");
-  const previousValue = userSelect.value;
-  userSelect.innerHTML = "";
+function setCurrentUser(user) {
+  state.currentUser = user;
+  if (user) {
+    localStorage.setItem("smartExchangeUser", JSON.stringify(user));
+  } else {
+    localStorage.removeItem("smartExchangeUser");
+  }
+  updateAccountUI();
+  syncOfferMode();
+}
 
-  state.users.forEach((user) => {
-    const option = document.createElement("option");
-    option.value = user.name;
-    option.textContent = `${user.name} (${user.availableCredits} credits available)`;
-    userSelect.append(option);
-  });
-
-  if (state.users.some((user) => user.name === previousValue)) {
-    userSelect.value = previousValue;
+function updateAccountUI() {
+  const freshUser = selectedUser();
+  if (state.currentUser && freshUser) {
+    state.currentUser = { ...state.currentUser, ...freshUser };
+    localStorage.setItem("smartExchangeUser", JSON.stringify(state.currentUser));
   }
 
-  syncOfferMode();
+  if (!state.currentUser) {
+    dom.accountTitle.textContent = "No account logged in";
+    dom.accountSummary.textContent = "Log in to list resources, request items, and use your own semester credits.";
+    dom.logoutButton.classList.add("hidden");
+    document.querySelector("#listing-owner").value = "";
+    document.querySelector("#listing-owner").placeholder = "Log in first";
+    dom.offerAccount.textContent = "Log in to make an offer with your own credits.";
+    return;
+  }
+
+  const user = state.currentUser;
+  const semesterName = state.semester?.name || "active semester";
+  dom.accountTitle.textContent = user.name;
+  dom.accountSummary.textContent = `${user.email || "Student account"} - ${user.availableCredits} available credits, ${user.lockedCredits} locked for ${semesterName}.`;
+  dom.logoutButton.classList.remove("hidden");
+  document.querySelector("#listing-owner").value = user.name;
+  dom.offerAccount.textContent = `Logged in as ${user.name}`;
 }
 
 async function refreshData() {
@@ -267,16 +301,36 @@ async function refreshData() {
   state.users = payload.users || [];
   state.semester = payload.semester || null;
   renderResources();
-  renderUsers();
+  updateAccountUI();
   renderInternships();
+}
+
+async function restoreSession() {
+  if (!state.currentUser?.authToken) return;
+  const response = await fetch("/api/session", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ authToken: state.currentUser.authToken })
+  });
+  if (!response.ok) {
+    setCurrentUser(null);
+    return;
+  }
+  const data = await response.json();
+  setCurrentUser(data.user);
 }
 
 dom.offerForm.addEventListener("submit", async (event) => {
   event.preventDefault();
+  if (!state.currentUser) {
+    showStatus(dom.offerStatus, "Please log in before making an offer.", true);
+    openView("auth");
+    return;
+  }
 
   const payload = {
     resourceId: Number(dom.resourceSelect.value),
-    studentName: document.querySelector("#student-name").value.trim(),
+    authToken: state.currentUser.authToken,
     urgency: document.querySelector("#urgency").value,
     mode: document.querySelector("#mode").value,
     bidValue: Number(document.querySelector("#bid-value").value)
@@ -300,10 +354,15 @@ dom.offerForm.addEventListener("submit", async (event) => {
 
 dom.listingForm.addEventListener("submit", async (event) => {
   event.preventDefault();
+  if (!state.currentUser) {
+    showStatus(dom.listingStatus, "Please log in before listing a resource.", true);
+    openView("auth");
+    return;
+  }
 
   const payload = {
     title: document.querySelector("#listing-title").value.trim(),
-    owner: document.querySelector("#listing-owner").value.trim(),
+    authToken: state.currentUser.authToken,
     type: document.querySelector("#listing-type").value,
     mode: document.querySelector("#listing-mode").value,
     urgency: document.querySelector("#listing-urgency").value,
@@ -328,6 +387,54 @@ dom.listingForm.addEventListener("submit", async (event) => {
   await refreshData();
 });
 
+dom.registerForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const response = await fetch("/api/register", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      name: document.querySelector("#register-name").value.trim(),
+      email: document.querySelector("#register-email").value.trim(),
+      password: document.querySelector("#register-password").value
+    })
+  });
+  const data = await response.json();
+  if (!response.ok) {
+    showStatus(dom.registerStatus, data.error || "Account could not be created.", true);
+    return;
+  }
+  dom.registerForm.reset();
+  setCurrentUser(data.user);
+  showStatus(dom.registerStatus, "Account created and logged in.");
+  await refreshData();
+});
+
+dom.loginForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const response = await fetch("/api/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      email: document.querySelector("#login-email").value.trim(),
+      password: document.querySelector("#login-password").value
+    })
+  });
+  const data = await response.json();
+  if (!response.ok) {
+    showStatus(dom.loginStatus, data.error || "Could not log in.", true);
+    return;
+  }
+  dom.loginForm.reset();
+  setCurrentUser(data.user);
+  showStatus(dom.loginStatus, "Logged in successfully.");
+  await refreshData();
+});
+
+dom.logoutButton.addEventListener("click", () => {
+  setCurrentUser(null);
+  showStatus(dom.loginStatus, "Logged out.");
+});
+
 dom.refresh.addEventListener("click", async () => {
   await refreshData();
   showStatus(dom.offerStatus, "Listings refreshed.");
@@ -344,7 +451,6 @@ dom.typeFilter.addEventListener("change", () => {
 });
 
 dom.resourceSelect.addEventListener("change", syncOfferMode);
-document.querySelector("#student-name").addEventListener("change", syncOfferMode);
 
 document.querySelectorAll("[data-view-target]").forEach((control) => {
   control.addEventListener("click", () => openView(control.dataset.viewTarget));
@@ -367,6 +473,8 @@ window.addEventListener("hashchange", () => {
   });
 });
 
-refreshData().catch(() => {
-  showStatus(dom.offerStatus, "Could not connect to the C++ backend.", true);
-});
+restoreSession()
+  .then(refreshData)
+  .catch(() => {
+    showStatus(dom.offerStatus, "Could not connect to the C++ backend.", true);
+  });

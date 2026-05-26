@@ -19,6 +19,7 @@
       <button class="nav-link" type="button" data-view-target="request">Request</button>
       <button class="nav-link" type="button" data-view-target="list-resource">List</button>
       <button class="nav-link" type="button" data-view-target="opportunities">Opportunities</button>
+      <button class="nav-link" type="button" data-view-target="auth">Account</button>
     </nav>
   </header>
 
@@ -169,6 +170,59 @@
       </section>
     </section>
 
+    <section class="view" id="auth" data-view>
+      <div class="view-head">
+        <div>
+          <p class="eyebrow">Student account</p>
+          <h1>Register or log in</h1>
+        </div>
+      </div>
+      <section class="auth-layout">
+        <article class="window-panel account-panel">
+          <p class="eyebrow">Current session</p>
+          <h2 id="account-title">No account logged in</h2>
+          <p id="account-summary" class="muted-text">Log in to list resources, request items, and use your own semester credits.</p>
+          <button id="logout-button" class="secondary-button hidden" type="button">Log out</button>
+        </article>
+        <article class="window-panel">
+          <p class="eyebrow">New user</p>
+          <h2>Create account</h2>
+          <form id="register-form" class="form-stack">
+            <label>
+              Name
+              <input id="register-name" type="text" placeholder="Priya Sharma" required>
+            </label>
+            <label>
+              Email
+              <input id="register-email" type="email" placeholder="student@example.com" required>
+            </label>
+            <label>
+              Password
+              <input id="register-password" type="password" minlength="4" required>
+            </label>
+            <button class="primary-button" type="submit">Create account</button>
+          </form>
+          <p id="register-status" class="status hidden" aria-live="polite"></p>
+        </article>
+        <article class="window-panel">
+          <p class="eyebrow">Existing user</p>
+          <h2>Log in</h2>
+          <form id="login-form" class="form-stack">
+            <label>
+              Email
+              <input id="login-email" type="email" placeholder="student@example.com" required>
+            </label>
+            <label>
+              Password
+              <input id="login-password" type="password" required>
+            </label>
+            <button class="primary-button" type="submit">Log in</button>
+          </form>
+          <p id="login-status" class="status hidden" aria-live="polite"></p>
+        </article>
+      </section>
+    </section>
+
     <section class="view" id="market" data-view>
       <div class="view-head">
         <div>
@@ -213,10 +267,7 @@
             Resource
             <select id="resource-id" required></select>
           </label>
-          <label>
-            Student name
-            <select id="student-name" required></select>
-          </label>
+          <div id="offer-account" class="account-inline">Log in to make an offer with your own credits.</div>
           <div class="two-col">
             <label>
               Wallet score used
@@ -266,7 +317,7 @@
           </label>
           <label>
             Owner name
-            <input id="listing-owner" type="text" placeholder="Your name" required>
+            <input id="listing-owner" type="text" placeholder="Log in first" readonly required>
           </label>
           <label>
             Type

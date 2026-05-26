@@ -490,9 +490,33 @@ textarea {
 .form-stack,
 .resource-list,
 .internship-list,
-.process-list {
+.process-list,
+.auth-layout {
   display: grid;
   gap: 14px;
+}
+
+.auth-layout {
+  grid-template-columns: 0.9fr 1fr 1fr;
+  align-items: start;
+}
+
+.account-panel h2 {
+  margin-bottom: 12px;
+}
+
+.muted-text,
+.account-inline {
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.account-inline {
+  padding: 13px 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.035);
+  font-weight: 800;
 }
 
 .resource-list {
@@ -879,6 +903,7 @@ option {
   .feature-grid,
   .resource-list,
   .internship-list,
+  .auth-layout,
   .scale-grid,
   .testimonial-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));

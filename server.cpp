@@ -55,9 +55,11 @@ struct Internship {
 struct User {
   int id;
   std::string name;
+  std::string email;
   int creditBalance;
   int lockedCredits;
   int availableCredits;
+  std::string authToken;
 };
 
 std::vector<Resource> resources;
@@ -68,6 +70,10 @@ CRITICAL_SECTION appLock;
 
 const std::string DATA_DIR = "data";
 const std::string DATABASE_FILE = "data/smart_resource_exchange.sqlite";
+
+int lockedCreditsForUser(int userId);
+int creditBalanceForUser(int userId);
+void ensureSemesterGrant(int userId);
 
 std::string escapeJson(const std::string& value) {
   std::ostringstream out;
@@ -97,6 +103,25 @@ bool isValidUrgency(const std::string& urgency) {
 
 bool isValidMode(const std::string& mode) {
   return mode == "Exchange" || mode == "Bidding";
+}
+
+std::string hashValue(const std::string& value) {
+  unsigned long long hash = 1469598103934665603ULL;
+  for (unsigned char ch : value) {
+    hash ^= ch;
+    hash *= 1099511628211ULL;
+  }
+  std::ostringstream out;
+  out << std::hex << hash;
+  return out.str();
+}
+
+std::string passwordHash(const std::string& password) {
+  return hashValue("smart-resource-exchange:" + password);
+}
+
+std::string createAuthToken(int userId, const std::string& email) {
+  return hashValue(email + ":" + std::to_string(userId) + ":" + std::to_string(std::time(nullptr)));
 }
 
 std::string sqliteText(sqlite3_stmt* statement, int column) {
@@ -181,6 +206,9 @@ bool initDatabase() {
     "CREATE TABLE IF NOT EXISTS users ("
     "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
     "  name TEXT NOT NULL UNIQUE,"
+    "  email TEXT DEFAULT '',"
+    "  password_hash TEXT DEFAULT '',"
+    "  auth_token TEXT DEFAULT '',"
     "  credit_balance INTEGER NOT NULL DEFAULT 0,"
     "  created_at INTEGER NOT NULL"
     ");"
@@ -215,6 +243,9 @@ bool initDatabase() {
   ok = ok && addColumnIfMissing("offers", "user_id", "INTEGER DEFAULT 0");
   ok = ok && addColumnIfMissing("offers", "locked_credits", "INTEGER DEFAULT 0");
   ok = ok && addColumnIfMissing("offers", "status", "TEXT DEFAULT 'pending'");
+  ok = ok && addColumnIfMissing("users", "email", "TEXT DEFAULT ''");
+  ok = ok && addColumnIfMissing("users", "password_hash", "TEXT DEFAULT ''");
+  ok = ok && addColumnIfMissing("users", "auth_token", "TEXT DEFAULT ''");
   return ok;
 }
 
@@ -338,6 +369,52 @@ int findUserId(const std::string& name) {
   return userId;
 }
 
+User userByStatement(sqlite3_stmt* statement) {
+  User user;
+  user.id = sqlite3_column_int(statement, 0);
+  user.name = sqliteText(statement, 1);
+  user.email = sqliteText(statement, 2);
+  user.creditBalance = sqlite3_column_int(statement, 3);
+  user.authToken = sqliteText(statement, 4);
+  user.lockedCredits = lockedCreditsForUser(user.id);
+  user.availableCredits = user.creditBalance - user.lockedCredits;
+  return user;
+}
+
+bool loadUserByToken(const std::string& authToken, User& user) {
+  if (authToken.empty()) return false;
+  sqlite3_stmt* statement = nullptr;
+  bool found = false;
+  sqlite3_prepare_v2(database,
+    "SELECT id, name, email, credit_balance, auth_token FROM users WHERE auth_token = ?",
+    -1, &statement, nullptr);
+  bindText(statement, 1, authToken);
+  if (sqlite3_step(statement) == SQLITE_ROW) {
+    user = userByStatement(statement);
+    ensureSemesterGrant(user.id);
+    user.creditBalance = creditBalanceForUser(user.id);
+    user.lockedCredits = lockedCreditsForUser(user.id);
+    user.availableCredits = user.creditBalance - user.lockedCredits;
+    found = true;
+  }
+  sqlite3_finalize(statement);
+  return found;
+}
+
+bool emailExists(const std::string& email) {
+  sqlite3_stmt* statement = nullptr;
+  bool exists = false;
+  sqlite3_prepare_v2(database, "SELECT id FROM users WHERE email = ?", -1, &statement, nullptr);
+  bindText(statement, 1, email);
+  exists = sqlite3_step(statement) == SQLITE_ROW;
+  sqlite3_finalize(statement);
+  return exists;
+}
+
+bool nameExists(const std::string& name) {
+  return findUserId(name) != 0;
+}
+
 void ensureSemesterGrant(int userId) {
   int semesterId = ensureActiveSemester();
   sqlite3_stmt* statement = nullptr;
@@ -374,6 +451,20 @@ int ensureUser(const std::string& name) {
   }
   ensureSemesterGrant(userId);
   return userId;
+}
+
+std::string userJson(const User& user) {
+  std::ostringstream json;
+  json << "{"
+       << "\"id\":" << user.id << ","
+       << "\"name\":\"" << escapeJson(user.name) << "\","
+       << "\"email\":\"" << escapeJson(user.email) << "\","
+       << "\"creditBalance\":" << user.creditBalance << ","
+       << "\"lockedCredits\":" << user.lockedCredits << ","
+       << "\"availableCredits\":" << user.availableCredits << ","
+       << "\"authToken\":\"" << escapeJson(user.authToken) << "\""
+       << "}";
+  return json.str();
 }
 
 int lockedCreditsForUser(int userId) {
@@ -603,16 +694,10 @@ void loadData() {
   sqlite3_finalize(statement);
 
   sqlite3_prepare_v2(database,
-    "SELECT id, name, credit_balance FROM users ORDER BY name ASC",
+    "SELECT id, name, email, credit_balance, auth_token FROM users ORDER BY name ASC",
     -1, &statement, nullptr);
   while (sqlite3_step(statement) == SQLITE_ROW) {
-    User user;
-    user.id = sqlite3_column_int(statement, 0);
-    user.name = sqliteText(statement, 1);
-    user.creditBalance = sqlite3_column_int(statement, 2);
-    user.lockedCredits = lockedCreditsForUser(user.id);
-    user.availableCredits = user.creditBalance - user.lockedCredits;
-    users.push_back(user);
+    users.push_back(userByStatement(statement));
   }
   sqlite3_finalize(statement);
 }
@@ -784,14 +869,20 @@ std::string submitOffer(const std::string& body, int& statusCode) {
   allocateExpiredResources();
 
   int resourceId = parseIntField(body, "resourceId");
-  std::string studentName = parseStringField(body, "studentName");
+  std::string authToken = parseStringField(body, "authToken");
   std::string urgency = parseStringField(body, "urgency");
   std::string mode = parseStringField(body, "mode");
   int bidValue = parseIntField(body, "bidValue");
 
-  if (studentName.empty() || resourceId <= 0) {
+  User currentUser;
+  if (!loadUserByToken(authToken, currentUser)) {
+    statusCode = 401;
+    return "{\"error\":\"Please log in before making an offer.\"}";
+  }
+
+  if (resourceId <= 0) {
     statusCode = 400;
-    return "{\"error\":\"Student name and resource are required.\"}";
+    return "{\"error\":\"Resource is required.\"}";
   }
 
   if (!isValidUrgency(urgency)) {
@@ -818,7 +909,7 @@ std::string submitOffer(const std::string& body, int& statusCode) {
     return "{\"error\":\"Resource not found.\"}";
   }
 
-  int userId = ensureUser(studentName);
+  int userId = currentUser.id;
   int availableCredits = availableCreditsForUser(userId);
 
   if (it->ownerUserId == userId) {
@@ -861,7 +952,7 @@ std::string submitOffer(const std::string& body, int& statusCode) {
   int creditScore = std::min(availableCredits, 50);
   int lockedCredits = mode == "Bidding" ? bidValue : 0;
   int score = calculatePriorityScore(creditScore, urgency, bidValue, mode);
-  insertOffer(resourceId, userId, studentName, creditScore, urgency, mode, bidValue, score, lockedCredits, std::time(nullptr));
+  insertOffer(resourceId, userId, currentUser.name, creditScore, urgency, mode, bidValue, score, lockedCredits, std::time(nullptr));
 
   statusCode = 201;
   std::ostringstream response;
@@ -873,15 +964,21 @@ std::string submitOffer(const std::string& body, int& statusCode) {
 std::string createResource(const std::string& body, int& statusCode) {
   std::string title = parseStringField(body, "title");
   std::string type = parseStringField(body, "type");
-  std::string owner = parseStringField(body, "owner");
+  std::string authToken = parseStringField(body, "authToken");
   std::string description = parseStringField(body, "description");
   std::string urgency = parseStringField(body, "urgency");
   std::string mode = parseStringField(body, "mode");
   int durationMinutes = parseIntField(body, "durationMinutes", 180);
 
-  if (title.empty() || type.empty() || owner.empty() || description.empty()) {
+  User currentUser;
+  if (!loadUserByToken(authToken, currentUser)) {
+    statusCode = 401;
+    return "{\"error\":\"Please log in before listing a resource.\"}";
+  }
+
+  if (title.empty() || type.empty() || description.empty()) {
     statusCode = 400;
-    return "{\"error\":\"Title, type, owner, and description are required.\"}";
+    return "{\"error\":\"Title, type, and description are required.\"}";
   }
 
   if (!isValidUrgency(urgency)) {
@@ -894,14 +991,123 @@ std::string createResource(const std::string& body, int& statusCode) {
     durationMinutes = 5;
   }
 
-  int ownerUserId = ensureUser(owner);
   std::time_t deadline = std::time(nullptr) + (durationMinutes * 60);
-  insertResource(ownerUserId, title, type, owner, description, urgency, mode, deadline);
+  insertResource(currentUser.id, title, type, currentUser.name, description, urgency, mode, deadline);
 
   statusCode = 201;
   std::ostringstream response;
   response << "{\"ok\":true,\"id\":" << sqlite3_last_insert_rowid(database) << "}";
   return response.str();
+}
+
+std::string registerUser(const std::string& body, int& statusCode) {
+  std::string name = parseStringField(body, "name");
+  std::string email = parseStringField(body, "email");
+  std::string password = parseStringField(body, "password");
+
+  if (name.empty() || email.empty() || password.empty()) {
+    statusCode = 400;
+    return "{\"error\":\"Name, email, and password are required.\"}";
+  }
+
+  if (password.size() < 4) {
+    statusCode = 400;
+    return "{\"error\":\"Password must be at least 4 characters.\"}";
+  }
+
+  if (emailExists(email)) {
+    statusCode = 409;
+    return "{\"error\":\"An account with this email already exists.\"}";
+  }
+
+  if (nameExists(name)) {
+    statusCode = 409;
+    return "{\"error\":\"This display name is already taken.\"}";
+  }
+
+  sqlite3_stmt* statement = nullptr;
+  std::string token = createAuthToken(0, email);
+  sqlite3_prepare_v2(database,
+    "INSERT INTO users(name, email, password_hash, auth_token, credit_balance, created_at) VALUES (?, ?, ?, ?, 0, ?)",
+    -1, &statement, nullptr);
+  bindText(statement, 1, name);
+  bindText(statement, 2, email);
+  bindText(statement, 3, passwordHash(password));
+  bindText(statement, 4, token);
+  sqlite3_bind_int64(statement, 5, static_cast<sqlite3_int64>(std::time(nullptr)));
+  if (sqlite3_step(statement) != SQLITE_DONE) {
+    sqlite3_finalize(statement);
+    statusCode = 500;
+    return "{\"error\":\"Account could not be created.\"}";
+  }
+  sqlite3_finalize(statement);
+
+  int userId = static_cast<int>(sqlite3_last_insert_rowid(database));
+  token = createAuthToken(userId, email);
+  sqlite3_prepare_v2(database, "UPDATE users SET auth_token = ? WHERE id = ?", -1, &statement, nullptr);
+  bindText(statement, 1, token);
+  sqlite3_bind_int(statement, 2, userId);
+  sqlite3_step(statement);
+  sqlite3_finalize(statement);
+
+  ensureSemesterGrant(userId);
+  User user;
+  loadUserByToken(token, user);
+  statusCode = 201;
+  return "{\"ok\":true,\"user\":" + userJson(user) + "}";
+}
+
+std::string loginUser(const std::string& body, int& statusCode) {
+  std::string email = parseStringField(body, "email");
+  std::string password = parseStringField(body, "password");
+
+  if (email.empty() || password.empty()) {
+    statusCode = 400;
+    return "{\"error\":\"Email and password are required.\"}";
+  }
+
+  sqlite3_stmt* statement = nullptr;
+  int userId = 0;
+  std::string storedHash;
+  std::string name;
+  sqlite3_prepare_v2(database,
+    "SELECT id, name, password_hash FROM users WHERE email = ?",
+    -1, &statement, nullptr);
+  bindText(statement, 1, email);
+  if (sqlite3_step(statement) == SQLITE_ROW) {
+    userId = sqlite3_column_int(statement, 0);
+    name = sqliteText(statement, 1);
+    storedHash = sqliteText(statement, 2);
+  }
+  sqlite3_finalize(statement);
+
+  if (userId == 0 || storedHash.empty() || storedHash != passwordHash(password)) {
+    statusCode = 401;
+    return "{\"error\":\"Invalid email or password.\"}";
+  }
+
+  std::string token = createAuthToken(userId, email);
+  sqlite3_prepare_v2(database, "UPDATE users SET auth_token = ? WHERE id = ?", -1, &statement, nullptr);
+  bindText(statement, 1, token);
+  sqlite3_bind_int(statement, 2, userId);
+  sqlite3_step(statement);
+  sqlite3_finalize(statement);
+
+  ensureSemesterGrant(userId);
+  User user;
+  loadUserByToken(token, user);
+  statusCode = 200;
+  return "{\"ok\":true,\"user\":" + userJson(user) + "}";
+}
+
+std::string sessionUser(const std::string& body, int& statusCode) {
+  User user;
+  if (!loadUserByToken(parseStringField(body, "authToken"), user)) {
+    statusCode = 401;
+    return "{\"error\":\"Session expired. Please log in again.\"}";
+  }
+  statusCode = 200;
+  return "{\"ok\":true,\"user\":" + userJson(user) + "}";
 }
 
 std::string contentTypeFor(const std::string& path) {
@@ -941,6 +1147,7 @@ std::string httpResponse(int statusCode, const std::string& body, const std::str
   std::string reason = statusCode == 200 ? "OK" :
                        statusCode == 201 ? "Created" :
                        statusCode == 400 ? "Bad Request" :
+                       statusCode == 401 ? "Unauthorized" :
                        statusCode == 404 ? "Not Found" :
                        statusCode == 409 ? "Conflict" : "Server Error";
   std::ostringstream response;
@@ -991,6 +1198,18 @@ void handleClient(SOCKET client) {
   if (method == "GET" && path == "/api/resources") {
     EnterCriticalSection(&appLock);
     responseBody = resourcesJson();
+    LeaveCriticalSection(&appLock);
+  } else if (method == "POST" && path == "/api/register") {
+    EnterCriticalSection(&appLock);
+    responseBody = registerUser(body, statusCode);
+    LeaveCriticalSection(&appLock);
+  } else if (method == "POST" && path == "/api/login") {
+    EnterCriticalSection(&appLock);
+    responseBody = loginUser(body, statusCode);
+    LeaveCriticalSection(&appLock);
+  } else if (method == "POST" && path == "/api/session") {
+    EnterCriticalSection(&appLock);
+    responseBody = sessionUser(body, statusCode);
     LeaveCriticalSection(&appLock);
   } else if (method == "POST" && path == "/api/offers") {
     EnterCriticalSection(&appLock);
