@@ -60,6 +60,8 @@ struct User {
   std::string email;
   std::string role;
   bool isBot;
+  int highUrgencyUsed;
+  int highUrgencyRemaining;
   int creditBalance;
   int lockedCredits;
   int availableCredits;
@@ -74,9 +76,11 @@ CRITICAL_SECTION appLock;
 
 const std::string DATA_DIR = "data";
 const std::string DATABASE_FILE = "data/smart_resource_exchange.sqlite";
+const int HIGH_URGENCY_LIMIT_PER_SEMESTER = 2;
 
 int lockedCreditsForUser(int userId);
 int creditBalanceForUser(int userId);
+int highUrgencyUsesForUser(int userId);
 void ensureSemesterGrant(int userId);
 
 std::string escapeJson(const std::string& value) {
@@ -395,6 +399,8 @@ User userByStatement(sqlite3_stmt* statement) {
   user.authToken = sqliteText(statement, 6);
   user.lockedCredits = lockedCreditsForUser(user.id);
   user.availableCredits = user.creditBalance - user.lockedCredits;
+  user.highUrgencyUsed = highUrgencyUsesForUser(user.id);
+  user.highUrgencyRemaining = std::max(0, HIGH_URGENCY_LIMIT_PER_SEMESTER - user.highUrgencyUsed);
   return user;
 }
 
@@ -507,6 +513,8 @@ std::string userJson(const User& user) {
        << "\"email\":\"" << escapeJson(user.email) << "\","
        << "\"role\":\"" << escapeJson(user.role) << "\","
        << "\"isBot\":" << (user.isBot ? "true" : "false") << ","
+       << "\"highUrgencyUsed\":" << user.highUrgencyUsed << ","
+       << "\"highUrgencyRemaining\":" << user.highUrgencyRemaining << ","
        << "\"creditBalance\":" << user.creditBalance << ","
        << "\"lockedCredits\":" << user.lockedCredits << ","
        << "\"availableCredits\":" << user.availableCredits << ","
@@ -543,6 +551,28 @@ int creditBalanceForUser(int userId) {
 
 int availableCreditsForUser(int userId) {
   return creditBalanceForUser(userId) - lockedCreditsForUser(userId);
+}
+
+int highUrgencyUsesForUser(int userId) {
+  int semesterId = ensureActiveSemester();
+  sqlite3_stmt* statement = nullptr;
+  int count = 0;
+  sqlite3_prepare_v2(database,
+    "SELECT COUNT(*) "
+    "FROM offers "
+    "WHERE user_id = ? "
+    "  AND urgency = 'High' "
+    "  AND timestamp >= (SELECT CAST(strftime('%s', starts_on) AS INTEGER) FROM semesters WHERE id = ?) "
+    "  AND timestamp < (SELECT CAST(strftime('%s', date(ends_on, '+1 day')) AS INTEGER) FROM semesters WHERE id = ?)",
+    -1, &statement, nullptr);
+  sqlite3_bind_int(statement, 1, userId);
+  sqlite3_bind_int(statement, 2, semesterId);
+  sqlite3_bind_int(statement, 3, semesterId);
+  if (sqlite3_step(statement) == SQLITE_ROW) {
+    count = sqlite3_column_int(statement, 0);
+  }
+  sqlite3_finalize(statement);
+  return count;
 }
 
 int insertResource(int ownerUserId, const std::string& title, const std::string& type, const std::string& owner,
@@ -921,6 +951,8 @@ std::string resourcesJson() {
          << "\"name\":\"" << escapeJson(user.name) << "\","
          << "\"role\":\"" << escapeJson(user.role) << "\","
          << "\"isBot\":" << (user.isBot ? "true" : "false") << ","
+         << "\"highUrgencyUsed\":" << user.highUrgencyUsed << ","
+         << "\"highUrgencyRemaining\":" << user.highUrgencyRemaining << ","
          << "\"creditBalance\":" << user.creditBalance << ","
          << "\"lockedCredits\":" << user.lockedCredits << ","
          << "\"availableCredits\":" << user.availableCredits
@@ -1047,6 +1079,11 @@ std::string submitOffer(const std::string& body, int& statusCode) {
     return "{\"error\":\"Bid exceeds the student's available credits.\"}";
   }
 
+  if (urgency == "High" && highUrgencyUsesForUser(userId) >= HIGH_URGENCY_LIMIT_PER_SEMESTER) {
+    statusCode = 400;
+    return "{\"error\":\"High priority can only be used twice per semester.\"}";
+  }
+
   for (const Offer& offer : it->offers) {
     if (offer.userId == userId && offer.status == "pending") {
       statusCode = 409;
@@ -1062,7 +1099,9 @@ std::string submitOffer(const std::string& body, int& statusCode) {
   statusCode = 201;
   std::ostringstream response;
   response << "{\"ok\":true,\"score\":" << score
-           << ",\"availableCredits\":" << availableCredits - lockedCredits << "}";
+           << ",\"availableCredits\":" << availableCredits - lockedCredits
+           << ",\"highUrgencyRemaining\":" << std::max(0, HIGH_URGENCY_LIMIT_PER_SEMESTER - highUrgencyUsesForUser(userId))
+           << "}";
   return response.str();
 }
 

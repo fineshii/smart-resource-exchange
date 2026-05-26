@@ -12,6 +12,7 @@ Smart Resource Exchange is a DAA based web application for student resource shar
 - Student resource publishing form
 - Offer and bidding form
 - Semester credit grants and locked bidding credits
+- Two High-priority requests per user per semester
 - Bot publisher accounts with starter marketplace listings
 - Deadline-based allocation
 - Priority score formula and greedy winner selection
@@ -20,10 +21,10 @@ Smart Resource Exchange is a DAA based web application for student resource shar
 ## DAA logic
 
 ```text
-Priority Score = (Credit Score x 2) + Urgency Weight + Bid Value
+Priority Score = (Base Credit Score x 2) + Urgency Weight + Bid Value
 ```
 
-When a resource deadline passes, the backend inserts all valid offers into a max priority queue and allocates the resource to the highest scoring offer.
+The base credit score is capped at 50 from the user's available wallet credits. When a resource deadline passes, the backend inserts all valid offers into a max priority queue and allocates the resource to the highest scoring offer.
 
 ## Run it
 

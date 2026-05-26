@@ -155,11 +155,25 @@ function selectedUser() {
   return state.users.find((user) => user.id === state.currentUser.id) || state.currentUser;
 }
 
+function syncUrgencyLimit(user) {
+  const urgencyInput = document.querySelector("#urgency");
+  const highOption = urgencyInput.querySelector("option[value='High']");
+  const remaining = user?.highUrgencyRemaining ?? 0;
+  highOption.disabled = !user || remaining <= 0;
+  highOption.textContent = user
+    ? `High (${remaining} left)`
+    : "High";
+  if (highOption.disabled && urgencyInput.value === "High") {
+    urgencyInput.value = "Medium";
+  }
+}
+
 function syncOfferMode() {
   const resource = selectedResource();
   const user = selectedUser();
   const submitButton = dom.offerForm.querySelector("button[type='submit']");
   if (!state.currentUser) {
+    syncUrgencyLimit(null);
     document.querySelector("#credits").value = "0";
     document.querySelector("#bid-value").value = "0";
     document.querySelector("#bid-value").disabled = true;
@@ -170,6 +184,7 @@ function syncOfferMode() {
   }
 
   if (!resource || !user || !isOpen(resource)) {
+    syncUrgencyLimit(user);
     document.querySelector("#credits").value = "0";
     document.querySelector("#bid-value").value = "0";
     document.querySelector("#bid-value").disabled = true;
@@ -179,6 +194,7 @@ function syncOfferMode() {
   }
 
   if (resource.ownerUserId === user.id) {
+    syncUrgencyLimit(user);
     document.querySelector("#credits").value = "0";
     document.querySelector("#bid-value").value = "0";
     document.querySelector("#bid-value").disabled = true;
@@ -191,12 +207,13 @@ function syncOfferMode() {
   const modeInput = document.querySelector("#mode");
   const bidInput = document.querySelector("#bid-value");
   const creditsInput = document.querySelector("#credits");
-  const walletScore = Math.min(user.availableCredits, 50);
+  const baseCreditScore = Math.min(user.availableCredits, 50);
 
+  syncUrgencyLimit(user);
   dom.offerAccount.textContent = `Logged in as ${user.name}`;
   modeInput.value = resource.mode;
   modeInput.disabled = true;
-  creditsInput.value = String(walletScore);
+  creditsInput.value = String(baseCreditScore);
   bidInput.disabled = resource.mode === "Exchange";
   bidInput.required = resource.mode === "Bidding";
   bidInput.max = String(user.availableCredits);
@@ -208,7 +225,7 @@ function syncOfferMode() {
   const semesterName = state.semester?.name || "active semester";
   showStatus(
     dom.walletStatus,
-    `${user.name}: ${user.availableCredits} available credits (${user.lockedCredits} locked) for ${semesterName}.`
+    `${user.name}: ${user.availableCredits} available credits (${user.lockedCredits} locked). High priority left: ${user.highUrgencyRemaining ?? 0}/2 for ${semesterName}.`
   );
 }
 
@@ -386,7 +403,8 @@ dom.offerForm.addEventListener("submit", async (event) => {
     return;
   }
 
-  showStatus(dom.offerStatus, `Offer accepted. Priority score: ${data.score}. Available credits: ${data.availableCredits}`);
+  const highRemaining = data.highUrgencyRemaining ?? selectedUser()?.highUrgencyRemaining ?? 0;
+  showStatus(dom.offerStatus, `Offer accepted. Priority score: ${data.score}. Available credits: ${data.availableCredits}. High priority left: ${highRemaining}/2.`);
   await refreshData();
 });
 

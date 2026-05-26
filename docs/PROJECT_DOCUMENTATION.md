@@ -6,7 +6,7 @@ Smart Resource Exchange is a DAA based web application for students to share, ex
 
 The core purpose is to demonstrate real algorithmic decision-making instead of first-come-first-serve allocation. The backend calculates offer priority, stores submitted offers in SQLite, allows students to publish their own listings, and allocates expired listings using a priority queue and greedy selection.
 
-The current version also uses student accounts. Each user has a semester credit wallet, bidding can lock credits until allocation, and selected sellers receive the winning bid credits after their listing is allocated.
+The current version also uses student accounts. Each user has a semester credit wallet, bidding can lock credits until allocation, selected sellers receive the winning bid credits after their listing is allocated, and High urgency can only be used twice per semester.
 
 ## Modules
 
@@ -31,8 +31,10 @@ The backend checks deadlines whenever resource data is requested or offers are s
 Each offer receives a priority score:
 
 ```text
-Priority Score = (Credit Score x 2) + Urgency Weight + Bid Value
+Priority Score = (Base Credit Score x 2) + Urgency Weight + Bid Value
 ```
+
+The base credit score is capped at 50 from the user's currently available wallet credits.
 
 Urgency weights:
 
@@ -41,6 +43,8 @@ Urgency weights:
 - Low: 8
 
 For exchange mode, bid value is ignored. For bidding mode, bid value contributes to the final score.
+
+High urgency is intentionally limited to two submitted offers per student per semester so users cannot mark every request as highest priority.
 
 ### Greedy Allocation
 
