@@ -18,6 +18,8 @@ Students can also publish their own resources by entering the title, owner name,
 
 Seeded bot publisher accounts publish starter resources such as library books, lab materials, notes, and placement workbooks. These records use the same `resources` table as student-published listings, with publish metadata attached.
 
+The listing window also shows the logged-in user's published resources. Once a resource is allocated, the owner can see the winner name and account email for contact.
+
 ### Offer and Bidding
 
 Students can submit sharing requests or credit bids before the listing deadline. Each offer stores the student name, credit score, urgency level, selected mode, bid value, calculated priority score, and timestamp.
@@ -90,7 +92,7 @@ Important fields:
 
 ### GET `/api/resources`
 
-Returns all resources, public user wallet summaries, active semester data, and internship/scholarship records.
+Returns all resources, winner contact fields for allocated resources, public user wallet summaries, active semester data, and internship/scholarship records.
 
 ### POST `/api/register`
 

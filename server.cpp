@@ -947,7 +947,35 @@ std::string resourcesJson() {
          << "\"publishedAt\":" << static_cast<long long>(r.publishedAt) << ","
          << "\"deadline\":" << static_cast<long long>(r.deadline) << ","
          << "\"offerCount\":" << r.offers.size() << ","
-         << "\"allocatedTo\":\"" << escapeJson(r.allocatedTo) << "\","
+         << "\"allocatedTo\":\"" << escapeJson(r.allocatedTo) << "\",";
+
+    int allocatedUserId = 0;
+    std::string allocatedUserEmail;
+    for (const Offer& offer : r.offers) {
+      if (offer.status == "won") {
+        allocatedUserId = offer.userId;
+        break;
+      }
+    }
+    if (allocatedUserId > 0) {
+      auto userIt = std::find_if(users.begin(), users.end(), [allocatedUserId](const User& user) {
+        return user.id == allocatedUserId;
+      });
+      if (userIt != users.end()) {
+        allocatedUserEmail = userIt->email;
+      }
+    } else if (!r.allocatedTo.empty()) {
+      auto userIt = std::find_if(users.begin(), users.end(), [&r](const User& user) {
+        return user.name == r.allocatedTo;
+      });
+      if (userIt != users.end()) {
+        allocatedUserId = userIt->id;
+        allocatedUserEmail = userIt->email;
+      }
+    }
+
+    json << "\"allocatedUserId\":" << allocatedUserId << ","
+         << "\"allocatedUserEmail\":\"" << escapeJson(allocatedUserEmail) << "\","
          << "\"bestScore\":" << r.bestScore
          << "}";
   }

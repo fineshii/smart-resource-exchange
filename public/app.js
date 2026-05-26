@@ -16,6 +16,7 @@ const dom = {
   resourceList: document.querySelector("#resource-list"),
   internshipList: document.querySelector("#internship-list"),
   resourceSelect: document.querySelector("#resource-id"),
+  myListings: document.querySelector("#my-listings"),
   offerForm: document.querySelector("#offer-form"),
   listingForm: document.querySelector("#listing-form"),
   registerForm: document.querySelector("#register-form"),
@@ -155,6 +156,16 @@ function selectResource(resourceId) {
   clearRequestResult();
   syncOfferMode();
   openView("request");
+}
+
+function contactLine(resource) {
+  if (!resource.allocatedTo) {
+    return isOpen(resource) ? "Winner pending" : "No winning offer";
+  }
+  if (resource.allocatedUserEmail) {
+    return `${resource.allocatedTo} - ${resource.allocatedUserEmail}`;
+  }
+  return resource.allocatedTo;
 }
 
 function selectedResource() {
@@ -303,6 +314,7 @@ function renderResources() {
   }
 
   syncOfferMode();
+  renderMyListings();
 
   dom.activeCount.textContent = String(active);
   dom.offerCount.textContent = String(offerTotal);
@@ -322,6 +334,77 @@ function renderInternships() {
   });
 }
 
+function renderMyListings() {
+  dom.myListings.innerHTML = "";
+  const user = selectedUser();
+
+  if (!user) {
+    const empty = document.createElement("p");
+    empty.className = "empty-state";
+    empty.textContent = "Log in to see the resources you have published.";
+    dom.myListings.append(empty);
+    return;
+  }
+
+  const ownedResources = state.resources.filter((resource) => resource.ownerUserId === user.id);
+  if (!ownedResources.length) {
+    const empty = document.createElement("p");
+    empty.className = "empty-state";
+    empty.textContent = "You have not listed any resources yet.";
+    dom.myListings.append(empty);
+    return;
+  }
+
+  ownedResources.forEach((resource) => {
+    const closed = !isOpen(resource);
+    const article = document.createElement("article");
+    article.className = "owner-listing";
+
+    const content = document.createElement("div");
+    const type = document.createElement("p");
+    type.className = "resource-type";
+    type.textContent = `${resource.type} - ${resource.mode}`;
+    const title = document.createElement("h3");
+    title.textContent = resource.title;
+    const description = document.createElement("p");
+    description.className = "description";
+    description.textContent = resource.description;
+    content.append(type, title, description);
+
+    const meta = document.createElement("div");
+    meta.className = "owner-listing-meta";
+
+    [
+      ["Status", resource.allocatedTo ? "Allocated" : closed ? "Closed" : "Open"],
+      ["Deadline", formatDeadline(resource.deadline)],
+      ["Offers", String(resource.offerCount)]
+    ].forEach(([label, value]) => {
+      const item = document.createElement("span");
+      const strong = document.createElement("strong");
+      strong.textContent = label;
+      const bold = document.createElement("b");
+      bold.textContent = value;
+      item.append(strong, bold);
+      meta.append(item);
+    });
+
+    const winner = document.createElement("span");
+    winner.className = "winner-contact";
+    const winnerLabel = document.createElement("strong");
+    winnerLabel.textContent = "Winner contact";
+    const contact = document.createElement(resource.allocatedUserEmail ? "a" : "span");
+    contact.textContent = contactLine(resource);
+    if (resource.allocatedUserEmail) {
+      contact.href = `mailto:${resource.allocatedUserEmail}`;
+    }
+    winner.append(winnerLabel, contact);
+    meta.append(winner);
+
+    article.append(content, meta);
+    dom.myListings.append(article);
+  });
+}
+
 function setCurrentUser(user) {
   state.currentUser = user;
   state.offerContextKey = null;
@@ -333,6 +416,7 @@ function setCurrentUser(user) {
   }
   updateAccountUI();
   syncOfferMode();
+  renderMyListings();
 }
 
 function updateAccountUI() {
