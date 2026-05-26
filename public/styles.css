@@ -502,12 +502,44 @@ textarea {
 }
 
 .auth-layout {
-  grid-template-columns: 0.9fr 1fr 1fr;
+  grid-template-columns: 1fr 1fr;
   align-items: start;
+}
+
+.account-panel {
+  grid-column: 1 / -1;
 }
 
 .account-panel h2 {
   margin-bottom: 12px;
+}
+
+.account-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.account-actions .primary-button,
+.account-actions .secondary-button {
+  width: auto;
+  min-width: 160px;
+  padding: 0 18px;
+}
+
+.signed-in-only {
+  display: none;
+}
+
+body.is-authenticated .signed-in-only {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+body.is-authenticated .signed-out-only {
+  display: none;
 }
 
 .muted-text,

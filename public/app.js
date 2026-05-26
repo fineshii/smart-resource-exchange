@@ -5,6 +5,7 @@ const state = {
   semester: null,
   currentUser: JSON.parse(localStorage.getItem("smartExchangeUser") || "null"),
   pendingView: null,
+  offerContextKey: null,
   search: "",
   type: "All"
 };
@@ -116,6 +117,16 @@ function showStatus(element, message, isError = false) {
   element.classList.remove("hidden");
 }
 
+function clearStatus(element) {
+  element.textContent = "";
+  element.classList.remove("error");
+  element.classList.add("hidden");
+}
+
+function clearRequestResult() {
+  clearStatus(dom.offerStatus);
+}
+
 function formatDeadline(value) {
   const date = new Date(value * 1000);
   return new Intl.DateTimeFormat(undefined, {
@@ -141,6 +152,7 @@ function filteredResources() {
 
 function selectResource(resourceId) {
   dom.resourceSelect.value = String(resourceId);
+  clearRequestResult();
   syncOfferMode();
   openView("request");
 }
@@ -169,6 +181,12 @@ function syncUrgencyLimit(user) {
 }
 
 function syncOfferMode() {
+  const contextKey = `${state.currentUser?.id || "guest"}:${dom.resourceSelect.value || "none"}`;
+  if (state.offerContextKey !== contextKey) {
+    clearRequestResult();
+    state.offerContextKey = contextKey;
+  }
+
   const resource = selectedResource();
   const user = selectedUser();
   const submitButton = dom.offerForm.querySelector("button[type='submit']");
@@ -306,6 +324,8 @@ function renderInternships() {
 
 function setCurrentUser(user) {
   state.currentUser = user;
+  state.offerContextKey = null;
+  clearRequestResult();
   if (user) {
     localStorage.setItem("smartExchangeUser", JSON.stringify(user));
   } else {
@@ -460,6 +480,7 @@ dom.registerForm.addEventListener("submit", async (event) => {
     return;
   }
   dom.registerForm.reset();
+  clearStatus(dom.loginStatus);
   setCurrentUser(data.user);
   showStatus(dom.registerStatus, "Account created and logged in.");
   await refreshData();
@@ -483,6 +504,7 @@ dom.loginForm.addEventListener("submit", async (event) => {
     return;
   }
   dom.loginForm.reset();
+  clearStatus(dom.registerStatus);
   setCurrentUser(data.user);
   showStatus(dom.loginStatus, "Logged in successfully.");
   await refreshData();

@@ -182,43 +182,47 @@
           <p class="eyebrow">Current session</p>
           <h2 id="account-title">No account logged in</h2>
           <p id="account-summary" class="muted-text">Log in to list resources, request items, and use your own semester credits.</p>
+          <div class="account-actions">
+            <button class="primary-button signed-in-only" type="button" data-view-target="dashboard">Go to dashboard</button>
+            <button class="secondary-button signed-in-only" type="button" data-view-target="request">Make an offer</button>
+          </div>
           <button id="logout-button" class="secondary-button hidden" type="button">Log out</button>
         </article>
-        <article class="window-panel">
-          <p class="eyebrow">New user</p>
-          <h2>Create account</h2>
-          <form id="register-form" class="form-stack">
-            <label>
-              Name
-              <input id="register-name" type="text" placeholder="Priya Sharma" required>
-            </label>
-            <label>
-              Email
-              <input id="register-email" type="email" placeholder="student@example.com" required>
-            </label>
-            <label>
-              Password
-              <input id="register-password" type="password" minlength="4" required>
-            </label>
-            <button class="primary-button" type="submit">Create account</button>
-          </form>
-          <p id="register-status" class="status hidden" aria-live="polite"></p>
-        </article>
-        <article class="window-panel">
+        <article class="window-panel signed-out-only">
           <p class="eyebrow">Existing user</p>
           <h2>Log in</h2>
           <form id="login-form" class="form-stack">
             <label>
               Email
-              <input id="login-email" type="email" placeholder="student@example.com" required>
+              <input id="login-email" type="email" placeholder="student@example.com" autocomplete="email" required>
             </label>
             <label>
               Password
-              <input id="login-password" type="password" required>
+              <input id="login-password" type="password" autocomplete="current-password" required>
             </label>
             <button class="primary-button" type="submit">Log in</button>
           </form>
           <p id="login-status" class="status hidden" aria-live="polite"></p>
+        </article>
+        <article class="window-panel signed-out-only">
+          <p class="eyebrow">New user</p>
+          <h2>Create account</h2>
+          <form id="register-form" class="form-stack">
+            <label>
+              Name
+              <input id="register-name" type="text" placeholder="Priya Sharma" autocomplete="name" required>
+            </label>
+            <label>
+              Email
+              <input id="register-email" type="email" placeholder="student@example.com" autocomplete="email" required>
+            </label>
+            <label>
+              Password
+              <input id="register-password" type="password" minlength="4" autocomplete="new-password" required>
+            </label>
+            <button class="primary-button" type="submit">Create account</button>
+          </form>
+          <p id="register-status" class="status hidden" aria-live="polite"></p>
         </article>
       </section>
     </section>
