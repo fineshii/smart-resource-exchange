@@ -17,6 +17,7 @@ Smart Resource Exchange is a DAA based web application for student resource shar
 - Deadline-based allocation
 - Priority score formula and greedy winner selection
 - Internship and scholarship module
+- haha
 
 ## DAA logic
 
